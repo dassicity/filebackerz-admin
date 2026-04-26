@@ -1,0 +1,158 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Definition of the design system. All colors, gradients, fonts, etc should be defined here.
+All colors MUST be HSL. */
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 0 0% 10%;
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 10%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 10%;
+
+    /* Crimson red primary color */
+    --primary: 348 83% 47%;
+    --primary-foreground: 0 0% 100%;
+
+    /* Darker crimson for accents */
+    --primary-dark: 348 83% 37%;
+    --primary-light: 348 83% 57%;
+
+    --secondary: 0 0% 96%;
+    --secondary-foreground: 0 0% 10%;
+    --muted: 0 0% 96%;
+    --muted-foreground: 0 0% 45%;
+    --accent: var(--primary);
+    --accent-foreground: var(--primary-foreground);
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    /* Semantic colors that adapt to branding */
+    --warning: 45 93% 47%;
+    --warning-foreground: 45 93% 15%;
+    --success: 142 71% 45%;
+    --success-foreground: 142 71% 15%;
+    --info: var(--primary);
+    --info-foreground: var(--primary-foreground);
+
+    --border: 0 0% 90%;
+    --input: 0 0% 90%;
+    --ring: 348 83% 47%;
+    --radius: 0.75rem;
+
+    /* Gradients */
+    --gradient-primary: linear-gradient(135deg, hsl(348 83% 47%) 0%, hsl(348 83% 37%) 100%);
+    --gradient-hero: linear-gradient(180deg, hsl(0 0% 100%) 0%, hsl(0 0% 98%) 100%);
+
+    /* Shadows with crimson tint */
+    --shadow-primary: 0 10px 40px -10px hsl(348 83% 47% / 0.3);
+    --shadow-card: 0 4px 20px -4px hsl(0 0% 0% / 0.1);
+
+    /* Transitions */
+    --transition-base: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .dark {
+    --background: 0 0% 7%;
+    --foreground: 0 0% 98%;
+    --card: 0 0% 10%;
+    --card-foreground: 0 0% 98%;
+    --popover: 0 0% 10%;
+    --popover-foreground: 0 0% 98%;
+    --primary: 348 83% 57%;
+    --primary-foreground: 0 0% 100%;
+
+    --primary-dark: 348 83% 47%;
+    --primary-light: 348 83% 67%;
+    --secondary: 0 0% 15%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 0 0% 15%;
+    --muted-foreground: 0 0% 60%;
+    --accent: var(--primary);
+    --accent-foreground: var(--primary-foreground);
+    --destructive: 0 62% 50%;
+    --destructive-foreground: 0 0% 98%;
+
+    /* Semantic colors for dark mode */
+    --warning: 45 93% 57%;
+    --warning-foreground: 45 93% 95%;
+    --success: 142 71% 55%;
+    --success-foreground: 142 71% 95%;
+    --info: var(--primary);
+    --info-foreground: var(--primary-foreground);
+
+    --border: 0 0% 20%;
+    --input: 0 0% 20%;
+    --ring: 348 83% 57%;
+
+    /* Gradients */
+    --gradient-primary: linear-gradient(135deg, hsl(348 83% 57%) 0%, hsl(348 83% 47%) 100%);
+    --gradient-hero: linear-gradient(180deg, hsl(0 0% 7%) 0%, hsl(0 0% 10%) 100%);
+
+    --shadow-primary: 0 10px 40px -10px hsl(348 83% 57% / 0.4);
+    --shadow-card: 0 4px 20px -4px hsl(0 0% 0% / 0.3);
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+
+  /* Dropdown menu item hover state - white text and icons */
+  [data-highlighted] svg {
+    color: hsl(var(--primary-foreground));
+  }
+
+  [data-highlighted] span:first-of-type {
+    color: hsl(var(--primary-foreground));
+  }
+
+  [data-highlighted] span:last-of-type {
+    color: hsl(var(--primary-foreground) / 0.8);
+  }
+
+  [data-highlighted]>div:first-child {
+    background-color: hsl(var(--primary-foreground) / 0.2);
+  }
+
+  /* Custom scrollbar styles */
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--border)) transparent;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background-color: hsl(var(--border));
+    border-radius: 3px;
+    transition: background-color 0.2s;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    background-color: hsl(var(--muted-foreground) / 0.5);
+  }
+
+  .scrollbar-thumb-border::-webkit-scrollbar-thumb {
+    background-color: hsl(var(--border));
+  }
+
+  .scrollbar-track-transparent::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}
