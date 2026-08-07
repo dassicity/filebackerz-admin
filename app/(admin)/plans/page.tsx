@@ -2,18 +2,22 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { toast } from "sonner";
 import {
   CreditCard,
   Save,
   TrendingUp,
+  TicketPercent,
   Users,
   Database,
   HardDrive,
   Layers,
   AlertTriangle,
+  Gauge,
 } from "lucide-react";
 import { PageHeader } from "@/components/common/page-header";
-import { PlanBadge } from "@/components/common/status-badges";
+import { DataTable, type Column } from "@/components/common/data-table";
+import { PlanBadge, StatusBadge } from "@/components/common/status-badges";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
@@ -27,11 +31,23 @@ import {
   usePlanDefaults,
   useUpdatePlanDefaults,
   useBillingOverview,
+  useBillingOverage,
 } from "@/lib/hooks/use-plans";
-import type { PlanTierDefaults, PlanTierKey } from "@/lib/api/plans";
-import { formatBytes, formatNumber, formatRelative } from "@/lib/formatters";
+import type {
+  OverageOrganization,
+  PlanTierDefaults,
+  PlanTierKey,
+  UpdatePlanDefaultsBody,
+} from "@/lib/api/plans";
+import {
+  formatBytes,
+  formatCents,
+  formatNumber,
+  formatRelative,
+} from "@/lib/formatters";
+import { CouponsTab } from "@/components/billing/coupons-tab";
 
-const TIERS: PlanTierKey[] = ["free", "pro", "enterprise"];
+const TIERS: PlanTierKey[] = ["trial", "paid"];
 const GB = 1024 * 1024 * 1024;
 
 export default function PlansPage() {
@@ -39,7 +55,7 @@ export default function PlansPage() {
     <div className="space-y-6">
       <PageHeader
         title="Plans & Billing"
-        description="Platform-wide plan distribution, quota defaults, and billing overview."
+        description="Plan distribution, pricing knobs, billing overview, storage overage, and coupons."
       />
       <Tabs defaultValue="distribution">
         <TabsList>
@@ -55,6 +71,14 @@ export default function PlansPage() {
             <CreditCard className="w-3.5 h-3.5 mr-1.5" />
             Billing
           </TabsTrigger>
+          <TabsTrigger value="overage">
+            <Gauge className="w-3.5 h-3.5 mr-1.5" />
+            Overage
+          </TabsTrigger>
+          <TabsTrigger value="coupons">
+            <TicketPercent className="w-3.5 h-3.5 mr-1.5" />
+            Coupons
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="distribution" className="mt-4">
@@ -65,6 +89,12 @@ export default function PlansPage() {
         </TabsContent>
         <TabsContent value="billing" className="mt-4">
           <BillingTab />
+        </TabsContent>
+        <TabsContent value="overage" className="mt-4">
+          <OverageTab />
+        </TabsContent>
+        <TabsContent value="coupons" className="mt-4">
+          <CouponsTab />
         </TabsContent>
       </Tabs>
     </div>
@@ -112,7 +142,7 @@ function DistributionTab() {
         </Card>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {isLoading
           ? TIERS.map((t) => (
               <Card key={t}>
@@ -177,11 +207,6 @@ function DistributionTab() {
                         value={formatBytes(tier.defaults.storageQuota)}
                       />
                       <DefaultLine
-                        icon={<Users className="w-3 h-3" />}
-                        label="Max members"
-                        value={formatNumber(tier.defaults.maxMembers)}
-                      />
-                      <DefaultLine
                         icon={<Database className="w-3 h-3" />}
                         label="Max BYOS"
                         value={formatNumber(tier.defaults.maxConnections)}
@@ -191,6 +216,34 @@ function DistributionTab() {
                         label="Max versions"
                         value={formatNumber(tier.defaults.maxFileVersions)}
                       />
+                      {tier.defaults.softSeatCap != null && (
+                        <DefaultLine
+                          icon={<Users className="w-3 h-3" />}
+                          label="Soft seat cap"
+                          value={formatNumber(tier.defaults.softSeatCap)}
+                        />
+                      )}
+                      {tier.defaults.overageBlockBytes != null && (
+                        <DefaultLine
+                          icon={<Gauge className="w-3 h-3" />}
+                          label="Overage block"
+                          value={formatBytes(tier.defaults.overageBlockBytes)}
+                        />
+                      )}
+                      {tier.defaults.overagePriceCents != null && (
+                        <DefaultLine
+                          icon={<CreditCard className="w-3 h-3" />}
+                          label="Price per block"
+                          value={formatCents(tier.defaults.overagePriceCents)}
+                        />
+                      )}
+                      {tier.defaults.overageCapBlocks != null && (
+                        <DefaultLine
+                          icon={<AlertTriangle className="w-3 h-3" />}
+                          label="Overage cap"
+                          value={`${formatNumber(tier.defaults.overageCapBlocks)} blocks`}
+                        />
+                      )}
                     </div>
                   </CardContent>
                 </Card>
@@ -223,27 +276,57 @@ function DefaultLine({
 
 type TierForm = {
   storageQuotaGB: string;
-  maxMembers: string;
   maxConnections: string;
   maxFileVersions: string;
+  softSeatCap: string;
+  overageBlockGB: string;
+  overagePriceDollars: string;
+  overageCapBlocks: string;
+};
+
+const EMPTY_TIER_FORM: TierForm = {
+  storageQuotaGB: "",
+  maxConnections: "",
+  maxFileVersions: "",
+  softSeatCap: "",
+  overageBlockGB: "",
+  overagePriceDollars: "",
+  overageCapBlocks: "",
 };
 
 function toForm(t: PlanTierDefaults): TierForm {
   return {
     storageQuotaGB: String(Math.round((t.storageQuota / GB) * 100) / 100),
-    maxMembers: String(t.maxMembers),
     maxConnections: String(t.maxConnections),
     maxFileVersions: String(t.maxFileVersions),
+    softSeatCap: t.softSeatCap != null ? String(t.softSeatCap) : "",
+    overageBlockGB:
+      t.overageBlockBytes != null
+        ? String(Math.round((t.overageBlockBytes / GB) * 100) / 100)
+        : "",
+    overagePriceDollars:
+      t.overagePriceCents != null ? String(t.overagePriceCents / 100) : "",
+    overageCapBlocks:
+      t.overageCapBlocks != null ? String(t.overageCapBlocks) : "",
   };
 }
 
-function fromForm(f: TierForm): PlanTierDefaults {
-  return {
+function fromForm(f: TierForm, tier: PlanTierKey): PlanTierDefaults {
+  const next: PlanTierDefaults = {
     storageQuota: Math.round(Number(f.storageQuotaGB || 0) * GB),
-    maxMembers: Number(f.maxMembers || 0),
     maxConnections: Number(f.maxConnections || 0),
     maxFileVersions: Number(f.maxFileVersions || 0),
   };
+  // Overage and seat-cap fields are rejected on trial — only send for paid.
+  if (tier === "paid") {
+    next.softSeatCap = Number(f.softSeatCap || 0);
+    next.overageBlockBytes = Math.round(Number(f.overageBlockGB || 0) * GB);
+    next.overagePriceCents = Math.round(
+      Number(f.overagePriceDollars || 0) * 100,
+    );
+    next.overageCapBlocks = Number(f.overageCapBlocks || 0);
+  }
+  return next;
 }
 
 function DefaultsTab() {
@@ -251,17 +334,15 @@ function DefaultsTab() {
   const mutation = useUpdatePlanDefaults();
 
   const [forms, setForms] = useState<Record<PlanTierKey, TierForm>>({
-    free: { storageQuotaGB: "", maxMembers: "", maxConnections: "", maxFileVersions: "" },
-    pro: { storageQuotaGB: "", maxMembers: "", maxConnections: "", maxFileVersions: "" },
-    enterprise: { storageQuotaGB: "", maxMembers: "", maxConnections: "", maxFileVersions: "" },
+    trial: EMPTY_TIER_FORM,
+    paid: EMPTY_TIER_FORM,
   });
 
   useEffect(() => {
     if (data) {
       setForms({
-        free: toForm(data.free),
-        pro: toForm(data.pro),
-        enterprise: toForm(data.enterprise),
+        trial: toForm(data.trial),
+        paid: toForm(data.paid),
       });
     }
   }, [data]);
@@ -272,27 +353,41 @@ function DefaultsTab() {
 
   const save = () => {
     if (!data) return;
-    const body: Partial<Record<PlanTierKey, PlanTierDefaults>> = {};
+    const body: UpdatePlanDefaultsBody = {};
     for (const tier of TIERS) {
-      const next = fromForm(forms[tier]);
+      const next = fromForm(forms[tier], tier);
       const prev = data[tier];
-      const changed =
-        next.storageQuota !== prev.storageQuota ||
-        next.maxMembers !== prev.maxMembers ||
-        next.maxConnections !== prev.maxConnections ||
-        next.maxFileVersions !== prev.maxFileVersions;
-      if (changed) body[tier] = next;
+      const patch: Partial<PlanTierDefaults> = {};
+      if (next.storageQuota !== prev.storageQuota)
+        patch.storageQuota = next.storageQuota;
+      if (next.maxConnections !== prev.maxConnections)
+        patch.maxConnections = next.maxConnections;
+      if (next.maxFileVersions !== prev.maxFileVersions)
+        patch.maxFileVersions = next.maxFileVersions;
+      if (tier === "paid") {
+        if (next.softSeatCap !== prev.softSeatCap)
+          patch.softSeatCap = next.softSeatCap;
+        if (next.overageBlockBytes !== prev.overageBlockBytes)
+          patch.overageBlockBytes = next.overageBlockBytes;
+        if (next.overagePriceCents !== prev.overagePriceCents)
+          patch.overagePriceCents = next.overagePriceCents;
+        if (next.overageCapBlocks !== prev.overageCapBlocks)
+          patch.overageCapBlocks = next.overageCapBlocks;
+      }
+      if (Object.keys(patch).length > 0) body[tier] = patch;
     }
-    if (Object.keys(body).length === 0) return;
+    if (Object.keys(body).length === 0) {
+      toast.info("No changes to save.");
+      return;
+    }
     mutation.mutate(body);
   };
 
   const reset = () => {
     if (!data) return;
     setForms({
-      free: toForm(data.free),
-      pro: toForm(data.pro),
-      enterprise: toForm(data.enterprise),
+      trial: toForm(data.trial),
+      paid: toForm(data.paid),
     });
   };
 
@@ -311,14 +406,17 @@ function DefaultsTab() {
       <Card>
         <CardContent className="p-4">
           <p className="text-sm text-muted-foreground">
-            These values are applied to new organizations. Existing orgs keep
-            their current quotas unless you override them on each org's detail
-            page.
+            Changes apply to new quota assignments — the next org creation, plan
+            change, or subscription event. Existing orgs keep their current
+            quota; override one immediately from its detail page. Overage price
+            and cap changes take effect on the next invoice. Users are unlimited
+            on both plans. Trial <em>length</em> is configured in System Config
+            → Config → Global settings.
           </p>
         </CardContent>
       </Card>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {TIERS.map((tier) => (
           <TierCard
             key={tier}
@@ -352,6 +450,14 @@ function TierCard({
   onChange: (field: keyof TierForm, value: string) => void;
 }) {
   const gb = Number(form.storageQuotaGB);
+  const blockGB = Number(form.overageBlockGB);
+  const priceDollars = Number(form.overagePriceDollars);
+  const capBlocks = Number(form.overageCapBlocks);
+  const maxBillCents =
+    Number.isFinite(priceDollars) && Number.isFinite(capBlocks)
+      ? Math.round(priceDollars * 100) * capBlocks
+      : 0;
+
   return (
     <Card>
       <CardHeader className="pb-3">
@@ -368,7 +474,7 @@ function TierCard({
             htmlFor={`${tier}-quota`}
             className="text-xs text-muted-foreground uppercase tracking-wider"
           >
-            Storage quota (GB)
+            Included storage (GB)
           </Label>
           <Input
             id={`${tier}-quota`}
@@ -383,22 +489,6 @@ function TierCard({
               ? `= ${formatBytes(gb * GB)}`
               : "—"}
           </p>
-        </div>
-
-        <div className="space-y-1.5">
-          <Label
-            htmlFor={`${tier}-members`}
-            className="text-xs text-muted-foreground uppercase tracking-wider"
-          >
-            Max members
-          </Label>
-          <Input
-            id={`${tier}-members`}
-            type="number"
-            min={0}
-            value={form.maxMembers}
-            onChange={(e) => onChange("maxMembers", e.target.value)}
-          />
         </div>
 
         <div className="space-y-1.5">
@@ -432,6 +522,103 @@ function TierCard({
             onChange={(e) => onChange("maxFileVersions", e.target.value)}
           />
         </div>
+
+        {tier === "paid" && (
+          <>
+            <div className="space-y-1.5 pt-3 border-t border-border">
+              <Label
+                htmlFor={`${tier}-seat-cap`}
+                className="text-xs text-muted-foreground uppercase tracking-wider"
+              >
+                Soft seat cap
+              </Label>
+              <Input
+                id={`${tier}-seat-cap`}
+                type="number"
+                min={0}
+                value={form.softSeatCap}
+                onChange={(e) => onChange("softSeatCap", e.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">
+                Alert threshold only — never blocks an invite.
+              </p>
+            </div>
+
+            <div className="pt-3 border-t border-border space-y-4">
+              <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                <Gauge className="w-3.5 h-3.5" />
+                Overage billing
+              </div>
+
+              <div className="space-y-1.5">
+                <Label
+                  htmlFor={`${tier}-overage-block`}
+                  className="text-xs text-muted-foreground uppercase tracking-wider"
+                >
+                  Overage block size (GB)
+                </Label>
+                <Input
+                  id={`${tier}-overage-block`}
+                  type="number"
+                  min={0}
+                  step={0.5}
+                  value={form.overageBlockGB}
+                  onChange={(e) => onChange("overageBlockGB", e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">
+                  {Number.isFinite(blockGB) && blockGB > 0
+                    ? `= ${formatBytes(blockGB * GB)} billing unit`
+                    : "—"}
+                </p>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label
+                  htmlFor={`${tier}-overage-price`}
+                  className="text-xs text-muted-foreground uppercase tracking-wider"
+                >
+                  Price per block (USD)
+                </Label>
+                <Input
+                  id={`${tier}-overage-price`}
+                  type="number"
+                  min={0}
+                  step={0.01}
+                  value={form.overagePriceDollars}
+                  onChange={(e) =>
+                    onChange("overagePriceDollars", e.target.value)
+                  }
+                />
+                <p className="text-xs text-muted-foreground">
+                  {Number.isFinite(priceDollars) && priceDollars > 0
+                    ? `= ${formatCents(Math.round(priceDollars * 100))} per block`
+                    : "—"}
+                </p>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label
+                  htmlFor={`${tier}-overage-cap`}
+                  className="text-xs text-muted-foreground uppercase tracking-wider"
+                >
+                  Overage cap (blocks per period)
+                </Label>
+                <Input
+                  id={`${tier}-overage-cap`}
+                  type="number"
+                  min={0}
+                  value={form.overageCapBlocks}
+                  onChange={(e) => onChange("overageCapBlocks", e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">
+                  {maxBillCents > 0
+                    ? `Max overage bill: ${formatCents(maxBillCents)} per period`
+                    : "—"}
+                </p>
+              </div>
+            </div>
+          </>
+        )}
       </CardContent>
     </Card>
   );
@@ -459,12 +646,38 @@ function BillingTab() {
           loading={isLoading}
         />
         <StatCard
+          label="Expired"
+          value={formatNumber(data?.summary.orgsExpired ?? 0)}
+          loading={isLoading}
+        />
+      </div>
+
+      <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
+        <StatCard
           label="Expired unpaid"
           value={formatNumber(data?.summary.trialExpiredUnpaid ?? 0)}
           loading={isLoading}
           accent={
-            (data?.summary.trialExpiredUnpaid ?? 0) > 0 ? "warning" : undefined
+            (data?.summary.trialExpiredUnpaid ?? 0) > 0
+              ? "destructive"
+              : undefined
           }
+          sub={
+            (data?.summary.trialExpiredUnpaid ?? 0) > 0
+              ? "Should be 0 — check the expireTrials cron"
+              : undefined
+          }
+        />
+        <StatCard
+          label="Over quota"
+          value={formatNumber(data?.summary.orgsOverQuota ?? 0)}
+          loading={isLoading}
+          accent={(data?.summary.orgsOverQuota ?? 0) > 0 ? "warning" : undefined}
+        />
+        <StatCard
+          label="Overage authorized"
+          value={formatNumber(data?.summary.orgsWithOverageAuthorized ?? 0)}
+          loading={isLoading}
         />
       </div>
 
@@ -478,7 +691,7 @@ function BillingTab() {
           {isLoading ? (
             <Skeleton className="h-20 w-full" />
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               {Object.entries(data?.summary.byPlan ?? {}).map(
                 ([plan, count]) => (
                   <div
@@ -495,7 +708,7 @@ function BillingTab() {
                 ),
               )}
               {Object.keys(data?.summary.byPlan ?? {}).length === 0 && (
-                <p className="col-span-3 text-sm text-muted-foreground text-center py-4">
+                <p className="col-span-2 text-sm text-muted-foreground text-center py-4">
                   No data.
                 </p>
               )}
@@ -555,7 +768,7 @@ function BillingTab() {
               Recent plan upgrades
             </CardTitle>
             <p className="text-xs text-muted-foreground mt-1">
-              Paid plans updated in the last 30 days
+              Orgs on the paid plan updated in the last 30 days
             </p>
           </CardHeader>
           <CardContent className="space-y-2">
@@ -593,28 +806,248 @@ function BillingTab() {
   );
 }
 
+function OverageTab() {
+  const { data, isLoading } = useBillingOverage();
+
+  const columns: Column<OverageOrganization>[] = [
+    {
+      key: "org",
+      header: "Organization",
+      cell: (o) => (
+        <div className="flex flex-col min-w-0">
+          <Link
+            href={`/organizations/${o.organizationId}`}
+            className="font-medium text-foreground hover:text-primary transition-colors truncate"
+          >
+            {o.name}
+          </Link>
+          <span className="text-xs text-muted-foreground truncate">
+            {o.slug}
+          </span>
+        </div>
+      ),
+    },
+    {
+      key: "status",
+      header: "Status",
+      cell: (o) => <StatusBadge status={o.status} />,
+    },
+    {
+      key: "usage",
+      header: "Used / quota",
+      cell: (o) => (
+        <span className="text-xs font-mono text-muted-foreground whitespace-nowrap">
+          {formatBytes(o.storageUsed)} / {formatBytes(o.storageQuota)}
+        </span>
+      ),
+    },
+    {
+      key: "peak",
+      header: "Period peak",
+      cell: (o) => (
+        <span className="text-xs font-mono text-foreground whitespace-nowrap">
+          {formatBytes(o.periodPeakStorageUsed)}
+        </span>
+      ),
+    },
+    {
+      key: "overage",
+      header: "Overage",
+      cell: (o) => (
+        <span className="text-xs font-mono text-destructive whitespace-nowrap">
+          +{formatBytes(o.overageBytes)}
+        </span>
+      ),
+    },
+    {
+      key: "blocks",
+      header: "Blocks",
+      cell: (o) => (
+        <span className="text-xs font-mono whitespace-nowrap">
+          {formatNumber(o.blocks)}
+          {o.capReached && (
+            <Badge
+              variant="outline"
+              className="ml-1.5 text-[9px] uppercase bg-warning/15 text-warning border-warning/30"
+              title={`${formatNumber(o.uncappedBlocks)} blocks before the cap`}
+            >
+              capped
+            </Badge>
+          )}
+        </span>
+      ),
+    },
+    {
+      key: "authorized",
+      header: "Authorized",
+      cell: (o) =>
+        o.overageAuthorized ? (
+          <Badge
+            variant="outline"
+            className="text-[10px] uppercase bg-success/15 text-success border-success/30"
+          >
+            Yes
+          </Badge>
+        ) : (
+          <Badge
+            variant="outline"
+            className="text-[10px] uppercase bg-muted text-muted-foreground border-border"
+          >
+            No
+          </Badge>
+        ),
+    },
+    {
+      key: "uploads",
+      header: "Uploads",
+      cell: (o) =>
+        o.uploadsBlocked ? (
+          <Badge
+            variant="outline"
+            className="text-[10px] uppercase bg-destructive/15 text-destructive border-destructive/30"
+          >
+            Blocked
+          </Badge>
+        ) : (
+          <span className="text-xs text-muted-foreground">OK</span>
+        ),
+    },
+    {
+      key: "charge",
+      header: "Projected charge",
+      cell: (o) => (
+        <span className="text-sm font-semibold text-foreground whitespace-nowrap">
+          {formatCents(o.projectedChargeCents)}
+        </span>
+      ),
+    },
+  ];
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <StatCard
+          label="Orgs over quota"
+          value={formatNumber(data?.summary.organizationsOverQuota ?? 0)}
+          loading={isLoading}
+        />
+        <StatCard
+          label="Authorized (billable)"
+          value={formatNumber(data?.summary.authorized ?? 0)}
+          loading={isLoading}
+        />
+        <StatCard
+          label="Uploads blocked"
+          value={formatNumber(data?.summary.blocked ?? 0)}
+          loading={isLoading}
+          accent={(data?.summary.blocked ?? 0) > 0 ? "destructive" : undefined}
+          sub={
+            (data?.summary.blocked ?? 0) > 0
+              ? "Over quota without authorization — worth contacting"
+              : undefined
+          }
+        />
+        <StatCard
+          label="Projected revenue"
+          value={formatCents(data?.summary.projectedRevenueCents ?? 0)}
+          loading={isLoading}
+        />
+      </div>
+
+      <Card>
+        <CardContent className="p-4 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-6 text-sm">
+          <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            Pricing
+          </span>
+          {isLoading ? (
+            <Skeleton className="h-5 w-64" />
+          ) : (
+            <>
+              <span className="text-muted-foreground">
+                Block:{" "}
+                <span className="font-mono text-foreground">
+                  {formatBytes(data?.pricing.blockBytes ?? 0)}
+                </span>
+              </span>
+              <span className="text-muted-foreground">
+                Price per block:{" "}
+                <span className="font-mono text-foreground">
+                  {formatCents(data?.pricing.pricePerBlockCents ?? 0)}
+                </span>
+              </span>
+              <span className="text-muted-foreground">
+                Cap:{" "}
+                <span className="font-mono text-foreground">
+                  {formatNumber(data?.pricing.maxBlocks ?? 0)} blocks (
+                  {formatCents(
+                    (data?.pricing.maxBlocks ?? 0) *
+                      (data?.pricing.pricePerBlockCents ?? 0),
+                  )}{" "}
+                  max)
+                </span>
+              </span>
+            </>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent className="p-0">
+          <DataTable
+            columns={columns}
+            rows={data?.organizations}
+            loading={isLoading}
+            rowKey={(o) => o.organizationId}
+            emptyState={
+              <div className="py-12 text-center">
+                <Gauge className="w-8 h-8 mx-auto text-muted-foreground/50 mb-2" />
+                <p className="text-sm font-medium text-foreground">
+                  No organizations over quota
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Charges are computed from the period peak at invoice time —
+                  deleting data before the invoice does not avoid them.
+                </p>
+              </div>
+            }
+          />
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 function StatCard({
   label,
   value,
   loading,
   accent,
+  sub,
 }: {
   label: string;
   value: string;
   loading?: boolean;
-  accent?: "warning";
+  accent?: "warning" | "destructive";
+  sub?: string;
 }) {
+  const accentClass =
+    accent === "warning"
+      ? "text-warning"
+      : accent === "destructive"
+        ? "text-destructive"
+        : "text-foreground";
   return (
     <Card>
       <CardContent className="p-4">
         <div className="text-xs text-muted-foreground uppercase tracking-wider">
           {label}
         </div>
-        <div
-          className={`text-2xl font-bold mt-1 ${accent === "warning" ? "text-warning" : "text-foreground"}`}
-        >
+        <div className={`text-2xl font-bold mt-1 ${accentClass}`}>
           {loading ? <Skeleton className="h-7 w-20" /> : value}
         </div>
+        {sub && !loading && (
+          <p className="text-xs text-muted-foreground mt-1">{sub}</p>
+        )}
       </CardContent>
     </Card>
   );

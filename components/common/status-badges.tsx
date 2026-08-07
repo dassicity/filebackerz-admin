@@ -7,6 +7,7 @@ function statusClass(status: string): string {
       return "bg-success/15 text-success border-success/30";
     case "inactive":
     case "suspended":
+    case "expired":
       return "bg-destructive/15 text-destructive border-destructive/30";
     case "pending":
     case "invited":
@@ -56,11 +57,9 @@ export function RoleBadge({ role }: { role: string }) {
 
 function planClass(plan: string): string {
   switch (plan) {
-    case "enterprise":
+    case "paid":
       return "bg-primary/15 text-primary border-primary/30";
-    case "pro":
-      return "bg-info/15 text-info border-info/30";
-    case "free":
+    case "trial":
     default:
       return "bg-muted text-muted-foreground border-border";
   }

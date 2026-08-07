@@ -6,10 +6,13 @@ import {
   MoreHorizontal,
   Pause,
   Play,
+  CalendarPlus,
   CreditCard,
+  Gauge,
   HardDrive,
   Link2,
   Trash2,
+  Users,
 } from "lucide-react";
 import {
   AlertDialog,
@@ -52,6 +55,9 @@ import {
   useUpdateOrgPlan,
   useUpdateOrgQuota,
   useUpdateOrgSubdomain,
+  useExtendOrgTrial,
+  useUpdateOrgOverage,
+  useUpdateOrgSeatCap,
   useDeleteOrganization,
 } from "@/lib/hooks/use-organizations";
 import type {
@@ -60,19 +66,29 @@ import type {
   OrgStatus,
 } from "@/lib/api/organizations";
 import { cn } from "@/lib/utils";
-import { formatBytes } from "@/lib/formatters";
+import { formatBytes, formatRelative } from "@/lib/formatters";
 
 interface OrgActionsProps {
   org: Pick<
     AdminListedOrganization,
-    "_id" | "name" | "plan" | "status" | "subdomain" | "storageQuota"
+    | "_id"
+    | "name"
+    | "plan"
+    | "status"
+    | "subdomain"
+    | "storageQuota"
+    | "billing"
+    | "softSeatCap"
   >;
 }
 
 type DialogKind =
   | "status"
   | "plan"
+  | "trial"
   | "quota"
+  | "overage"
+  | "seat-cap"
   | "subdomain"
   | "delete"
   | null;
@@ -93,12 +109,22 @@ export function OrgActions({ org }: OrgActionsProps) {
   const [subdomainValue, setSubdomainValue] = useState<string>(
     org.subdomain ?? "",
   );
+  const [extendDays, setExtendDays] = useState("30");
+  const [overageValue, setOverageValue] = useState<"authorized" | "revoked">(
+    org.billing?.overageAuthorized ? "authorized" : "revoked",
+  );
+  const [seatCapValue, setSeatCapValue] = useState<string>(
+    org.softSeatCap != null ? String(org.softSeatCap) : "",
+  );
   const [deleteConfirm, setDeleteConfirm] = useState("");
 
   const updateStatus = useUpdateOrgStatus();
   const updatePlan = useUpdateOrgPlan();
   const updateQuota = useUpdateOrgQuota();
   const updateSub = useUpdateOrgSubdomain();
+  const extendTrial = useExtendOrgTrial();
+  const updateOverage = useUpdateOrgOverage();
+  const updateSeatCap = useUpdateOrgSeatCap();
   const deleteOrg = useDeleteOrganization();
 
   const close = () => setDialog(null);
@@ -120,6 +146,31 @@ export function OrgActions({ org }: OrgActionsProps) {
     if (!Number.isFinite(gb) || gb <= 0) return;
     updateQuota.mutate(
       { orgId: org._id, args: [Math.round(gb * GB)] },
+      { onSuccess: close },
+    );
+  };
+
+  const submitTrial = () => {
+    const days = Number(extendDays);
+    if (!Number.isInteger(days) || days < 1) return;
+    extendTrial.mutate(
+      { orgId: org._id, args: [{ extendDays: days }] },
+      { onSuccess: close },
+    );
+  };
+
+  const submitOverage = () =>
+    updateOverage.mutate(
+      { orgId: org._id, args: [overageValue === "authorized"] },
+      { onSuccess: close },
+    );
+
+  const submitSeatCap = () => {
+    const trimmed = seatCapValue.trim();
+    const cap = trimmed === "" ? null : Number(trimmed);
+    if (cap !== null && (!Number.isInteger(cap) || cap < 1)) return;
+    updateSeatCap.mutate(
+      { orgId: org._id, args: [cap] },
       { onSuccess: close },
     );
   };
@@ -184,12 +235,46 @@ export function OrgActions({ org }: OrgActionsProps) {
 
           <DropdownMenuItem
             onClick={() => {
+              setExtendDays("30");
+              setDialog("trial");
+            }}
+          >
+            <CalendarPlus className="w-4 h-4 mr-2" />
+            Extend trial
+          </DropdownMenuItem>
+
+          <DropdownMenuItem
+            onClick={() => {
               setQuotaGB(String(Math.round(org.storageQuota / GB)));
               setDialog("quota");
             }}
           >
             <HardDrive className="w-4 h-4 mr-2" />
             Adjust quota
+          </DropdownMenuItem>
+
+          <DropdownMenuItem
+            onClick={() => {
+              setOverageValue(
+                org.billing?.overageAuthorized ? "authorized" : "revoked",
+              );
+              setDialog("overage");
+            }}
+          >
+            <Gauge className="w-4 h-4 mr-2" />
+            Overage authorization
+          </DropdownMenuItem>
+
+          <DropdownMenuItem
+            onClick={() => {
+              setSeatCapValue(
+                org.softSeatCap != null ? String(org.softSeatCap) : "",
+              );
+              setDialog("seat-cap");
+            }}
+          >
+            <Users className="w-4 h-4 mr-2" />
+            Seat cap
           </DropdownMenuItem>
 
           <DropdownMenuItem
@@ -235,12 +320,16 @@ export function OrgActions({ org }: OrgActionsProps) {
               <SelectContent>
                 <SelectItem value="active">Active</SelectItem>
                 <SelectItem value="trial">Trial</SelectItem>
+                <SelectItem value="expired">Expired</SelectItem>
                 <SelectItem value="suspended">Suspended</SelectItem>
                 <SelectItem value="deleted">Deleted</SelectItem>
               </SelectContent>
             </Select>
             <p className="text-xs text-muted-foreground">
-              Suspending blocks all user access immediately. Deleted hides the org but preserves data.
+              Expired and Suspended both make the org read-only — uploads
+              blocked, existing data untouched. Expired shows an upgrade CTA,
+              Suspended points to support. Deleted hides the org but preserves
+              data.
             </p>
           </div>
           <DialogFooter>
@@ -270,11 +359,17 @@ export function OrgActions({ org }: OrgActionsProps) {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="free">Free</SelectItem>
-                <SelectItem value="pro">Pro</SelectItem>
-                <SelectItem value="enterprise">Enterprise</SelectItem>
+                <SelectItem value="trial">Trial</SelectItem>
+                <SelectItem value="paid">Paid</SelectItem>
               </SelectContent>
             </Select>
+            <p className="text-xs text-muted-foreground">
+              Changes our records only — nothing is created, cancelled, or
+              modified in Stripe. Use it to comp an org onto the paid plan. The
+              storage quota is recomputed from plan defaults. If the org has a
+              live subscription, the nightly reconcile pulls Stripe&apos;s view
+              back over the top.
+            </p>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={close}>
@@ -282,6 +377,59 @@ export function OrgActions({ org }: OrgActionsProps) {
             </Button>
             <Button onClick={submitPlan} disabled={updatePlan.isPending}>
               {updatePlan.isPending ? "Saving…" : "Save plan"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Extend trial */}
+      <Dialog open={dialog === "trial"} onOpenChange={(o) => !o && close()}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Extend trial</DialogTitle>
+            <DialogDescription>
+              {org.name}
+              {org.billing?.trialEndsAt
+                ? ` · current trial ends ${formatRelative(org.billing.trialEndsAt)}`
+                : ""}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4 space-y-2">
+            <Label
+              htmlFor="extend-days"
+              className="text-xs text-muted-foreground uppercase tracking-wider"
+            >
+              Extra free days
+            </Label>
+            <Input
+              id="extend-days"
+              type="number"
+              min={1}
+              value={extendDays}
+              onChange={(e) => setExtendDays(e.target.value)}
+              placeholder="30"
+            />
+            <p className="text-xs text-muted-foreground">
+              Days count from the later of now and the current end date, so
+              extending an already-expired org grants real time. An expired org
+              is revived — uploads resume immediately — and the countdown
+              reminder emails fire again for the new window. Actively paying
+              orgs are never demoted. The owner is emailed about the extension.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={close}>
+              Cancel
+            </Button>
+            <Button
+              onClick={submitTrial}
+              disabled={
+                extendTrial.isPending ||
+                !Number.isInteger(Number(extendDays)) ||
+                Number(extendDays) < 1
+              }
+            >
+              {extendTrial.isPending ? "Extending…" : "Extend trial"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -330,6 +478,109 @@ export function OrgActions({ org }: OrgActionsProps) {
               }
             >
               {updateQuota.isPending ? "Saving…" : "Save quota"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Overage authorization */}
+      <Dialog open={dialog === "overage"} onOpenChange={(o) => !o && close()}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Overage authorization</DialogTitle>
+            <DialogDescription>{org.name}</DialogDescription>
+          </DialogHeader>
+          <div className="py-4 space-y-2">
+            <Label className="text-xs text-muted-foreground uppercase tracking-wider">
+              Storage overage
+            </Label>
+            <Select
+              value={overageValue}
+              onValueChange={(v) =>
+                setOverageValue(v as "authorized" | "revoked")
+              }
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="authorized">Authorized</SelectItem>
+                <SelectItem value="revoked">Not authorized</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              {overageValue === "authorized" ? (
+                <>
+                  The organization{" "}
+                  <span className="text-warning font-medium">
+                    will be charged
+                  </span>{" "}
+                  for storage above its allowance on its next invoice. Use this
+                  to unblock a customer mid-migration who cannot reach the
+                  checkbox themselves. Logged as a WARNING audit event.
+                </>
+              ) : (
+                <>
+                  While over quota without authorization, the organization
+                  cannot upload at all — it is blocked rather than billed.
+                </>
+              )}
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={close}>
+              Cancel
+            </Button>
+            <Button onClick={submitOverage} disabled={updateOverage.isPending}>
+              {updateOverage.isPending ? "Saving…" : "Save"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Seat cap */}
+      <Dialog open={dialog === "seat-cap"} onOpenChange={(o) => !o && close()}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Fair-use seat cap</DialogTitle>
+            <DialogDescription>{org.name}</DialogDescription>
+          </DialogHeader>
+          <div className="py-4 space-y-2">
+            <Label
+              htmlFor="seat-cap-input"
+              className="text-xs text-muted-foreground uppercase tracking-wider"
+            >
+              Soft seat cap
+            </Label>
+            <Input
+              id="seat-cap-input"
+              type="number"
+              min={1}
+              value={seatCapValue}
+              onChange={(e) => setSeatCapValue(e.target.value)}
+              placeholder="Platform default"
+            />
+            <p className="text-xs text-muted-foreground">
+              An alerting threshold only — it never blocks an invite, since all
+              plans include unlimited users. Crossing it raises an audit event
+              and emails the platform admin. Leave blank to restore the
+              platform default.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={close}>
+              Cancel
+            </Button>
+            <Button
+              onClick={submitSeatCap}
+              disabled={
+                updateSeatCap.isPending ||
+                (seatCapValue.trim() !== "" &&
+                  (!Number.isInteger(Number(seatCapValue)) ||
+                    Number(seatCapValue) < 1))
+              }
+            >
+              {updateSeatCap.isPending ? "Saving…" : "Save seat cap"}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -1,13 +1,17 @@
 import { apiClient } from "./client";
 
+export type PlanTierKey = "trial" | "paid";
+
 export interface PlanTierDefaults {
   storageQuota: number;
-  maxMembers: number;
   maxConnections: number;
   maxFileVersions: number;
+  // Paid-only pricing knobs — absent on the trial tier.
+  softSeatCap?: number;
+  overageBlockBytes?: number;
+  overagePriceCents?: number;
+  overageCapBlocks?: number;
 }
-
-export type PlanTierKey = "free" | "pro" | "enterprise";
 
 export type PlanDefaults = Record<PlanTierKey, PlanTierDefaults>;
 
@@ -70,6 +74,9 @@ export interface BillingOverviewResponse {
       orgsWithActiveSubscription: number;
       orgsOnTrial: number;
       trialExpiredUnpaid: number;
+      orgsExpired: number;
+      orgsOverQuota: number;
+      orgsWithOverageAuthorized: number;
       byPlan: Record<string, number>;
     };
     trialsExpiringSoon: {
@@ -94,6 +101,48 @@ export interface BillingOverviewResponse {
 export async function getBillingOverview(): Promise<BillingOverviewResponse> {
   const { data } = await apiClient.get<BillingOverviewResponse>(
     "/admin/billing/overview",
+  );
+  return data;
+}
+
+export interface OverageOrganization {
+  organizationId: string;
+  name: string;
+  slug: string;
+  status: string;
+  storageUsed: number;
+  storageQuota: number;
+  periodPeakStorageUsed: number;
+  overageBytes: number;
+  blocks: number;
+  uncappedBlocks: number;
+  capReached: boolean;
+  overageAuthorized: boolean;
+  uploadsBlocked: boolean;
+  projectedChargeCents: number;
+}
+
+export interface BillingOverageResponse {
+  success: true;
+  data: {
+    pricing: {
+      blockBytes: number;
+      pricePerBlockCents: number;
+      maxBlocks: number;
+    };
+    summary: {
+      organizationsOverQuota: number;
+      authorized: number;
+      blocked: number;
+      projectedRevenueCents: number;
+    };
+    organizations: OverageOrganization[];
+  };
+}
+
+export async function getBillingOverage(): Promise<BillingOverageResponse> {
+  const { data } = await apiClient.get<BillingOverageResponse>(
+    "/admin/billing/overage",
   );
   return data;
 }

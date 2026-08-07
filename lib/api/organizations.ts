@@ -1,8 +1,13 @@
 import { apiClient } from "./client";
 import type { AuditLogEntry, Pagination } from "./dashboard";
 
-export type OrgPlan = "free" | "pro" | "enterprise";
-export type OrgStatus = "active" | "trial" | "suspended" | "deleted";
+export type OrgPlan = "trial" | "paid";
+export type OrgStatus =
+  | "active"
+  | "trial"
+  | "expired"
+  | "suspended"
+  | "deleted";
 export type OrgType = "personal" | "team";
 
 export interface OrgSettings {
@@ -45,7 +50,13 @@ export interface AdminListedOrganization {
     stripeCustomerId: string | null;
     subscriptionId: string | null;
     currentPeriodEnd: string | null;
+    trialStartedAt?: string | null;
+    trialEndsAt?: string | null;
+    trialExtendedDays?: number;
+    overQuota?: boolean;
+    overageAuthorized?: boolean;
   };
+  softSeatCap?: number | null;
   createdAt: string;
   updatedAt: string;
   memberCount: number;
@@ -144,6 +155,87 @@ export async function updateOrgQuota(
   const { data } = await apiClient.put<OrgMutationResponse>(
     `/admin/organizations/${orgId}/quota`,
     { storageQuota },
+  );
+  return data;
+}
+
+export interface ExtendTrialBody {
+  extendDays?: number;
+  trialEndsAt?: string;
+}
+
+// Grants extra free days. `extendDays` counts from the later of now and the
+// current end date; an expired org is revived back to trial.
+export async function extendOrgTrial(
+  orgId: string,
+  body: ExtendTrialBody,
+): Promise<OrgMutationResponse> {
+  const { data } = await apiClient.put<OrgMutationResponse>(
+    `/admin/organizations/${orgId}/trial`,
+    body,
+  );
+  return data;
+}
+
+// Enabling means the org WILL be charged for storage above its allowance on
+// its next invoice.
+export async function updateOrgOverage(
+  orgId: string,
+  authorized: boolean,
+): Promise<OrgMutationResponse> {
+  const { data } = await apiClient.put<OrgMutationResponse>(
+    `/admin/organizations/${orgId}/overage`,
+    { authorized },
+  );
+  return data;
+}
+
+// Alert threshold only — never blocks an invite. null restores the platform
+// default.
+export async function updateOrgSeatCap(
+  orgId: string,
+  softSeatCap: number | null,
+): Promise<OrgMutationResponse> {
+  const { data } = await apiClient.put<OrgMutationResponse>(
+    `/admin/organizations/${orgId}/seat-cap`,
+    { softSeatCap },
+  );
+  return data;
+}
+
+export interface StorageSnapshot {
+  organizationId: string;
+  date: string;
+  bytesUsed: number;
+  quotaBytes: number;
+  overageBlocks: number;
+  plan: string;
+}
+
+export interface OrgStorageHistoryResponse {
+  success: true;
+  data: {
+    organization: {
+      id: string;
+      name: string;
+      slug: string;
+      plan: string;
+      storageQuota: number;
+      storageUsed: number;
+      periodPeakStorageUsed: number;
+    };
+    days: number;
+    snapshots: StorageSnapshot[];
+  };
+}
+
+export async function getOrgStorageHistory(
+  orgId: string,
+  days = 90,
+): Promise<OrgStorageHistoryResponse> {
+  const { data } = await apiClient.get<OrgStorageHistoryResponse>(
+    `/admin/organizations/${orgId}/storage-history`,
+    { params: { days } },
   );
   return data;
 }

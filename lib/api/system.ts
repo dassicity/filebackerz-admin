@@ -4,6 +4,7 @@ import type { PlanDefaults } from "./plans";
 export interface GlobalSettings {
   maxUploadSize: number;
   defaultTrashRetention: number;
+  trialDays: number;
   signupEnabled: boolean;
   maintenanceMode: boolean;
   maintenanceMessage: string;

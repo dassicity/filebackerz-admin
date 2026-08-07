@@ -506,10 +506,12 @@ function ConfigTab() {
   const [globalForm, setGlobalForm] = useState<{
     maxUploadSizeGB: string;
     defaultTrashRetention: string;
+    trialDays: string;
     signupEnabled: boolean;
   }>({
     maxUploadSizeGB: "",
     defaultTrashRetention: "",
+    trialDays: "",
     signupEnabled: true,
   });
 
@@ -547,6 +549,7 @@ function ConfigTab() {
         Math.round((data.globalSettings.maxUploadSize / GB) * 100) / 100,
       ),
       defaultTrashRetention: String(data.globalSettings.defaultTrashRetention),
+      trialDays: String(data.globalSettings.trialDays ?? ""),
       signupEnabled: data.globalSettings.signupEnabled,
     });
     setEmailForm({ ...data.emailSettings });
@@ -574,12 +577,14 @@ function ConfigTab() {
     const nextGlobal: Partial<GlobalSettings> = {
       maxUploadSize: Math.round(Number(globalForm.maxUploadSizeGB || 0) * GB),
       defaultTrashRetention: Number(globalForm.defaultTrashRetention || 0),
+      trialDays: Number(globalForm.trialDays || 0),
       signupEnabled: globalForm.signupEnabled,
     };
     if (
       nextGlobal.maxUploadSize !== data.globalSettings.maxUploadSize ||
       nextGlobal.defaultTrashRetention !==
         data.globalSettings.defaultTrashRetention ||
+      nextGlobal.trialDays !== data.globalSettings.trialDays ||
       nextGlobal.signupEnabled !== data.globalSettings.signupEnabled
     ) {
       next.globalSettings = nextGlobal;
@@ -692,6 +697,26 @@ function ConfigTab() {
                 }))
               }
             />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="trial-days">Trial length (days)</Label>
+            <Input
+              id="trial-days"
+              type="number"
+              min={0}
+              value={globalForm.trialDays}
+              onChange={(e) =>
+                setGlobalForm((f) => ({
+                  ...f,
+                  trialDays: e.target.value,
+                }))
+              }
+            />
+            <p className="text-xs text-muted-foreground">
+              Free window for new organizations. Quotas and overage pricing
+              live in Plans &amp; Billing → Plan defaults.
+            </p>
           </div>
 
           <ToggleRow

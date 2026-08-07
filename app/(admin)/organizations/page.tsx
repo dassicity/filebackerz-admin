@@ -177,9 +177,8 @@ export default function OrganizationsPage() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value={ALL}>All plans</SelectItem>
-                  <SelectItem value="free">Free</SelectItem>
-                  <SelectItem value="pro">Pro</SelectItem>
-                  <SelectItem value="enterprise">Enterprise</SelectItem>
+                  <SelectItem value="trial">Trial</SelectItem>
+                  <SelectItem value="paid">Paid</SelectItem>
                 </SelectContent>
               </Select>
 
@@ -191,6 +190,7 @@ export default function OrganizationsPage() {
                   <SelectItem value={ALL}>All statuses</SelectItem>
                   <SelectItem value="active">Active</SelectItem>
                   <SelectItem value="trial">Trial</SelectItem>
+                  <SelectItem value="expired">Expired</SelectItem>
                   <SelectItem value="suspended">Suspended</SelectItem>
                   <SelectItem value="deleted">Deleted</SelectItem>
                 </SelectContent>

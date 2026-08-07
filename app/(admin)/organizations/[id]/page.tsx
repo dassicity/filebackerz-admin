@@ -1,7 +1,16 @@
 "use client";
 
-import { use, useState } from "react";
+import { use, useMemo, useState } from "react";
 import Link from "next/link";
+import {
+  Area,
+  AreaChart,
+  CartesianGrid,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 import {
   ArrowLeft,
   Loader2,
@@ -29,11 +38,13 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   useOrganization,
   useOrgMembers,
   useOrgStorage,
   useOrgStorageConnections,
+  useOrgStorageHistory,
   useOrgAuditLogs,
 } from "@/lib/hooks/use-organizations";
 import type { OrgMember, OrgStorageConnection } from "@/lib/api/organizations";
@@ -321,6 +332,15 @@ function MembersTab({ orgId }: { orgId: string }) {
 }
 
 function StorageTab({ orgId }: { orgId: string }) {
+  return (
+    <div className="space-y-4">
+      <StorageDetailsSection orgId={orgId} />
+      <StorageHistoryCard orgId={orgId} />
+    </div>
+  );
+}
+
+function StorageDetailsSection({ orgId }: { orgId: string }) {
   const { data, isLoading } = useOrgStorage(orgId);
 
   if (isLoading) {
@@ -436,6 +456,145 @@ function StatLine({ label, value }: { label: string; value: string }) {
       </span>
       <span className="text-sm font-semibold text-foreground">{value}</span>
     </div>
+  );
+}
+
+const HISTORY_RANGES = [
+  { value: "30", label: "30d" },
+  { value: "90", label: "90d" },
+  { value: "365", label: "1y" },
+];
+
+function StorageHistoryCard({ orgId }: { orgId: string }) {
+  const [days, setDays] = useState("90");
+  const { data, isLoading } = useOrgStorageHistory(orgId, Number(days));
+
+  const points = useMemo(
+    () =>
+      (data?.snapshots ?? []).map((s) => ({
+        date: s.date.slice(0, 10),
+        used: s.bytesUsed,
+        quota: s.quotaBytes,
+      })),
+    [data],
+  );
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
+          <div>
+            <CardTitle className="text-base font-semibold">
+              Storage history
+            </CardTitle>
+            <p className="text-xs text-muted-foreground mt-1">
+              Daily snapshots (05:00 UTC) — overage charges are computed from
+              the period peak, not current usage.
+              {data?.organization.periodPeakStorageUsed != null &&
+                ` Period peak: ${formatBytes(data.organization.periodPeakStorageUsed)}.`}
+            </p>
+          </div>
+          <Tabs value={days} onValueChange={setDays}>
+            <TabsList className="h-8">
+              {HISTORY_RANGES.map((r) => (
+                <TabsTrigger
+                  key={r.value}
+                  value={r.value}
+                  className="text-xs px-2.5 py-1"
+                >
+                  {r.label}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </Tabs>
+        </div>
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <Skeleton className="h-[260px] w-full" />
+        ) : points.length === 0 ? (
+          <div className="h-[260px] flex flex-col items-center justify-center text-center">
+            <HardDrive className="w-8 h-8 text-muted-foreground/50 mb-2" />
+            <p className="text-sm text-muted-foreground">
+              No snapshots in this range yet.
+            </p>
+          </div>
+        ) : (
+          <div className="h-[260px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart
+                data={points}
+                margin={{ top: 10, right: 12, left: 4, bottom: 0 }}
+              >
+                <defs>
+                  <linearGradient
+                    id="fill-storage-history"
+                    x1="0"
+                    y1="0"
+                    x2="0"
+                    y2="1"
+                  >
+                    <stop
+                      offset="5%"
+                      stopColor="hsl(var(--primary))"
+                      stopOpacity={0.4}
+                    />
+                    <stop
+                      offset="95%"
+                      stopColor="hsl(var(--primary))"
+                      stopOpacity={0}
+                    />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                <XAxis
+                  dataKey="date"
+                  tickLine={false}
+                  axisLine={false}
+                  fontSize={11}
+                />
+                <YAxis
+                  tickFormatter={(v: number) => formatBytes(v)}
+                  tickLine={false}
+                  axisLine={false}
+                  fontSize={11}
+                  width={76}
+                />
+                <Tooltip
+                  formatter={(value, name) => [
+                    formatBytes(Number(value)),
+                    name === "used" ? "Used" : "Quota",
+                  ]}
+                  contentStyle={{
+                    backgroundColor: "hsl(var(--popover))",
+                    border: "1px solid hsl(var(--border))",
+                    borderRadius: "var(--radius)",
+                    fontSize: 12,
+                  }}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="quota"
+                  name="quota"
+                  stroke="hsl(var(--muted-foreground))"
+                  strokeDasharray="4 4"
+                  strokeWidth={1.5}
+                  fill="transparent"
+                />
+                <Area
+                  type="monotone"
+                  dataKey="used"
+                  name="used"
+                  stroke="hsl(var(--primary))"
+                  strokeWidth={2}
+                  fill="url(#fill-storage-history)"
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 

@@ -21,6 +21,21 @@ export function formatPercent(n: number | null | undefined, digits = 1): string 
   return `${n.toFixed(digits)}%`;
 }
 
+export function formatCents(
+  cents: number | null | undefined,
+  currency = "usd",
+): string {
+  if (cents == null || Number.isNaN(cents)) return "—";
+  try {
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: currency.toUpperCase(),
+    }).format(cents / 100);
+  } catch {
+    return `${(cents / 100).toFixed(2)} ${currency.toUpperCase()}`;
+  }
+}
+
 export function formatRelative(iso: string): string {
   try {
     return formatDistanceToNow(new Date(iso), { addSuffix: true });

@@ -15,9 +15,7 @@ import { formatBytes, formatNumber, formatPercent } from "@/lib/formatters";
 export function KpiGrid() {
   const { data, isLoading } = useOverview();
 
-  const paidOrgs =
-    (data?.organizations.byPlan.pro ?? 0) +
-    (data?.organizations.byPlan.enterprise ?? 0);
+  const paidOrgs = data?.organizations.byPlan.paid ?? 0;
 
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">

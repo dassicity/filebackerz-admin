@@ -13,6 +13,11 @@ import {
   getOrgAuditLogs,
   updateOrgSubdomain,
   deleteOrganization,
+  extendOrgTrial,
+  updateOrgOverage,
+  updateOrgSeatCap,
+  getOrgStorageHistory,
+  type ExtendTrialBody,
   type ListOrgsParams,
   type ListMembersParams,
   type OrgAuditLogsParams,
@@ -70,6 +75,20 @@ export function useOrgStorageConnections(orgId: string | undefined) {
     queryFn: async () => {
       if (!orgId) throw new Error("orgId required");
       return (await getOrgStorageConnections(orgId)).data;
+    },
+    enabled: !!orgId,
+  });
+}
+
+export function useOrgStorageHistory(
+  orgId: string | undefined,
+  days = 90,
+) {
+  return useQuery({
+    queryKey: ["admin", "organizations", orgId, "storage-history", days],
+    queryFn: async () => {
+      if (!orgId) throw new Error("orgId required");
+      return (await getOrgStorageHistory(orgId, days)).data;
     },
     enabled: !!orgId,
   });
@@ -141,6 +160,29 @@ export function useUpdateOrgSettings() {
     (orgId: string, body: UpdateOrgSettingsBody) =>
       updateOrgSettings(orgId, body),
     "Settings saved",
+  );
+}
+
+export function useExtendOrgTrial() {
+  return useOrgMutation(
+    (orgId: string, body: ExtendTrialBody) => extendOrgTrial(orgId, body),
+    "Trial extended",
+  );
+}
+
+export function useUpdateOrgOverage() {
+  return useOrgMutation(
+    (orgId: string, authorized: boolean) =>
+      updateOrgOverage(orgId, authorized),
+    "Overage authorization updated",
+  );
+}
+
+export function useUpdateOrgSeatCap() {
+  return useOrgMutation(
+    (orgId: string, softSeatCap: number | null) =>
+      updateOrgSeatCap(orgId, softSeatCap),
+    "Seat cap updated",
   );
 }
 

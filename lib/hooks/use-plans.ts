@@ -5,6 +5,7 @@ import {
   getPlanDefaults,
   updatePlanDefaults,
   getBillingOverview,
+  getBillingOverage,
   type UpdatePlanDefaultsBody,
 } from "@/lib/api/plans";
 
@@ -47,5 +48,12 @@ export function useBillingOverview() {
   return useQuery({
     queryKey: ["admin", "billing", "overview"],
     queryFn: async () => (await getBillingOverview()).data,
+  });
+}
+
+export function useBillingOverage() {
+  return useQuery({
+    queryKey: ["admin", "billing", "overage"],
+    queryFn: async () => (await getBillingOverage()).data,
   });
 }
