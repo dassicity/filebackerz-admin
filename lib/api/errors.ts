@@ -6,6 +6,8 @@ interface ApiErrorShape {
       message?: string;
       error?: string;
       errors?: unknown;
+      // Coupons: Stripe's own message on 502 PAYMENT_PROVIDER_ERROR.
+      providerError?: string;
     };
   };
 }
@@ -15,8 +17,8 @@ export function isNotFoundError(err: unknown): boolean {
 }
 
 // Pulls a human-readable message out of an axios error. The admin API puts it
-// in `error` (most routes) or `message` (content routes), and validation
-// failures may add an `errors[]` array with per-field detail.
+// in `error` (older content routes used `message`); validation failures may
+// add an `errors[]` array, and payment-provider failures a `providerError`.
 export function getApiErrorMessage(err: unknown, fallback: string): string {
   const e = err as ApiErrorShape | undefined;
   const data = e?.response?.data;
@@ -24,6 +26,9 @@ export function getApiErrorMessage(err: unknown, fallback: string): string {
   const details = Array.isArray(data?.errors)
     ? data.errors.filter((d): d is string => typeof d === "string")
     : [];
+  if (typeof data?.providerError === "string" && data.providerError) {
+    details.push(data.providerError);
+  }
 
   if (base && details.length > 0) return `${base}: ${details.join("; ")}`;
   if (base) return base;

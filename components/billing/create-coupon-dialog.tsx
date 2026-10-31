@@ -108,6 +108,7 @@ export function CreateCouponDialog({
                     id="coupon-code"
                     placeholder="FOUNDING50"
                     autoComplete="off"
+                    maxLength={40}
                     className={cn(
                       "font-mono",
                       errors.code &&
@@ -136,6 +137,7 @@ export function CreateCouponDialog({
                 id="coupon-name"
                 placeholder="Founding Member 50%"
                 autoComplete="off"
+                maxLength={40}
                 {...register("name")}
               />
               {errors.name && (
@@ -250,6 +252,7 @@ export function CreateCouponDialog({
                     <Input
                       type="number"
                       min={1}
+                      max={120}
                       placeholder="12"
                       className={cn(
                         "pr-16",

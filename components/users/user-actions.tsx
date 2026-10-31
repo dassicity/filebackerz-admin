@@ -85,16 +85,20 @@ export function UserActions({ user }: UserActionsProps) {
   const currentUser = useAuthStore((s) => s.user);
   const isSelf = currentUser?.id === user._id;
   const actorIsSuperadmin = currentUser?.role === "superadmin";
-  // Status, role, 2FA and session actions control whether someone can get
-  // in. Nobody gets them on their own account (one click locks you out), and
-  // a plain admin doesn't get them on a superadmin.
+  const targetIsPrivileged =
+    user.role === "admin" || user.role === "superadmin";
+  // Mirrors the backend's 403 INSUFFICIENT_ROLE rules: only a superadmin may
+  // act on another admin or superadmin, or grant/remove admin roles (so a
+  // plain admin can't change roles at all). Nobody changes status, 2FA or
+  // sessions on their own account — one click would lock them out.
   const canManageAccess =
-    !!currentUser &&
-    !isSelf &&
-    (actorIsSuperadmin || user.role !== "superadmin");
+    !!currentUser && !isSelf && (actorIsSuperadmin || !targetIsPrivileged);
+  const canChangeRole = !!currentUser && !isSelf && actorIsSuperadmin;
+  const canSendAccountEmails =
+    !!currentUser && (isSelf || actorIsSuperadmin || !targetIsPrivileged);
   const accessNote = isSelf
     ? "You can't change access on your own account."
-    : "Only a superadmin can change another superadmin's access.";
+    : "Only a superadmin can manage another admin's account.";
 
   const updateStatus = useUpdateUserStatus();
   const updateRole = useUpdateUserRole();
@@ -114,7 +118,7 @@ export function UserActions({ user }: UserActionsProps) {
   };
 
   const doRole = () => {
-    if (!canManageAccess) return;
+    if (!canChangeRole) return;
     if (roleValue === user.role) {
       close();
       return;
@@ -125,10 +129,14 @@ export function UserActions({ user }: UserActionsProps) {
     );
   };
 
-  const doResetPw = () =>
+  const doResetPw = () => {
+    if (!canSendAccountEmails) return;
     resetPw.mutate({ userId: user._id, args: [] }, { onSuccess: close });
-  const doVerify = () =>
+  };
+  const doVerify = () => {
+    if (!canSendAccountEmails) return;
     verifyEmail.mutate({ userId: user._id, args: [] }, { onSuccess: close });
+  };
   const doDisable2fa = () => {
     if (!canManageAccess) return;
     disable2fa.mutate({ userId: user._id, args: [] }, { onSuccess: close });
@@ -139,10 +147,10 @@ export function UserActions({ user }: UserActionsProps) {
   };
 
   const isLocal = user.authProvider === "local";
-  const hasAccountItems =
-    !user.isEmailVerified ||
-    isLocal ||
-    (canManageAccess && !!user.twoFactorAuth?.enabled);
+  const showVerifyEmail = canSendAccountEmails && !user.isEmailVerified;
+  const showResetPassword = canSendAccountEmails && isLocal;
+  const showDisable2fa = canManageAccess && !!user.twoFactorAuth?.enabled;
+  const hasAccountItems = showVerifyEmail || showResetPassword || showDisable2fa;
 
   return (
     <>
@@ -173,15 +181,17 @@ export function UserActions({ user }: UserActionsProps) {
                 </DropdownMenuItem>
               )}
 
-              <DropdownMenuItem
-                onClick={() => {
-                  setRoleValue(user.role as UserRole);
-                  setOpenDialog("change-role");
-                }}
-              >
-                <UserCheck className="w-4 h-4 mr-2" />
-                Change role
-              </DropdownMenuItem>
+              {canChangeRole && (
+                <DropdownMenuItem
+                  onClick={() => {
+                    setRoleValue(user.role as UserRole);
+                    setOpenDialog("change-role");
+                  }}
+                >
+                  <UserCheck className="w-4 h-4 mr-2" />
+                  Change role
+                </DropdownMenuItem>
+              )}
             </>
           ) : (
             <DropdownMenuLabel className="max-w-[220px] text-xs text-muted-foreground font-normal">
@@ -191,21 +201,21 @@ export function UserActions({ user }: UserActionsProps) {
 
           {hasAccountItems && <DropdownMenuSeparator />}
 
-          {!user.isEmailVerified && (
+          {showVerifyEmail && (
             <DropdownMenuItem onClick={() => setOpenDialog("verify-email")}>
               <Mail className="w-4 h-4 mr-2" />
               Force verify email
             </DropdownMenuItem>
           )}
 
-          {isLocal && (
+          {showResetPassword && (
             <DropdownMenuItem onClick={() => setOpenDialog("reset-password")}>
               <KeyRound className="w-4 h-4 mr-2" />
               Send password reset
             </DropdownMenuItem>
           )}
 
-          {canManageAccess && user.twoFactorAuth?.enabled && (
+          {showDisable2fa && (
             <DropdownMenuItem onClick={() => setOpenDialog("disable-2fa")}>
               <ShieldOff className="w-4 h-4 mr-2" />
               Disable 2FA
@@ -291,16 +301,12 @@ export function UserActions({ user }: UserActionsProps) {
               <SelectContent>
                 <SelectItem value="user">User</SelectItem>
                 <SelectItem value="admin">Admin</SelectItem>
-                {actorIsSuperadmin && (
-                  <SelectItem value="superadmin">Superadmin</SelectItem>
-                )}
+                <SelectItem value="superadmin">Superadmin</SelectItem>
               </SelectContent>
             </Select>
-            {!actorIsSuperadmin && (
-              <p className="text-xs text-muted-foreground">
-                Only superadmins can promote to superadmin.
-              </p>
-            )}
+            <p className="text-xs text-muted-foreground">
+              The last active superadmin can&apos;t be demoted.
+            </p>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={close}>

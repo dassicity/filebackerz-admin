@@ -6,6 +6,7 @@ import {
   MoreHorizontal,
   Pause,
   Play,
+  CalendarX,
   CalendarPlus,
   CreditCard,
   Gauge,
@@ -63,8 +64,9 @@ import {
 import type {
   AdminListedOrganization,
   OrgPlan,
-  OrgStatus,
+  OrgStatusChange,
 } from "@/lib/api/organizations";
+import { useAuthStore } from "@/lib/store/auth-store";
 import { cn } from "@/lib/utils";
 import { formatBytes, formatRelative } from "@/lib/formatters";
 
@@ -83,7 +85,6 @@ interface OrgActionsProps {
 }
 
 type DialogKind =
-  | "status"
   | "plan"
   | "trial"
   | "quota"
@@ -95,13 +96,66 @@ type DialogKind =
 
 const GB = 1024 * 1024 * 1024;
 
+const MAX_EXTEND_DAYS = 365;
+
+const STATUS_ACTIONS: Record<
+  OrgStatusChange,
+  {
+    title: string;
+    description: string;
+    confirmLabel: string;
+    destructive?: boolean;
+  }
+> = {
+  suspended: {
+    title: "Suspend organization?",
+    description:
+      "The org becomes read-only: uploads are blocked and members are pointed to support. Existing data is untouched.",
+    confirmLabel: "Suspend",
+    destructive: true,
+  },
+  unsuspend: {
+    title: "Unsuspend organization?",
+    description:
+      "The status is restored from billing: active if it has a paying subscription or a running comp, trial if its trial window is still open, otherwise expired.",
+    confirmLabel: "Unsuspend",
+  },
+  expired: {
+    title: "End trial now?",
+    description:
+      "Sets the trial end to now and marks the org expired. It becomes read-only with an upgrade prompt until it subscribes or you extend the trial.",
+    confirmLabel: "End trial",
+    destructive: true,
+  },
+  deleted: {
+    title: "Soft-delete organization?",
+    description:
+      "Cancels the Stripe subscription (nothing changes if Stripe fails), then hides the org. Data is preserved and the org can be restored with Unsuspend.",
+    confirmLabel: "Soft-delete",
+    destructive: true,
+  },
+};
+
 export function OrgActions({ org }: OrgActionsProps) {
   const router = useRouter();
   const [dialog, setDialog] = useState<DialogKind>(null);
-
-  const [statusValue, setStatusValue] = useState<OrgStatus>(
-    org.status as OrgStatus,
+  const [pendingStatus, setPendingStatus] = useState<OrgStatusChange | null>(
+    null,
   );
+
+  const isSuperadmin = useAuthStore((s) => s.user?.role === "superadmin");
+  const isLocked = org.status === "suspended" || org.status === "deleted";
+  const hasSubscription = !!org.billing?.subscriptionId;
+  // Mirrors the backend's 409 ORG_ALREADY_PAID / CANNOT_EXPIRE rules: a comp
+  // also puts the org on plan "paid", so plan "trial" implies no comp.
+  const isPaying =
+    hasSubscription || (org.plan === "paid" && org.status === "active");
+  const canExtendTrial = !isLocked && !isPaying;
+  const canEndTrial =
+    !isLocked &&
+    org.plan === "trial" &&
+    org.status !== "expired" &&
+    !hasSubscription;
   const [planValue, setPlanValue] = useState<OrgPlan>(org.plan as OrgPlan);
   const [quotaGB, setQuotaGB] = useState<string>(
     String(Math.round(org.storageQuota / GB)),
@@ -129,11 +183,11 @@ export function OrgActions({ org }: OrgActionsProps) {
 
   const close = () => setDialog(null);
 
-  const submitStatus = () =>
-    updateStatus.mutate(
-      { orgId: org._id, args: [statusValue] },
-      { onSuccess: close },
-    );
+  const submitStatus = () => {
+    if (!pendingStatus) return;
+    updateStatus.mutate({ orgId: org._id, args: [pendingStatus] });
+    setPendingStatus(null);
+  };
 
   const submitPlan = () =>
     updatePlan.mutate(
@@ -152,7 +206,7 @@ export function OrgActions({ org }: OrgActionsProps) {
 
   const submitTrial = () => {
     const days = Number(extendDays);
-    if (!Number.isInteger(days) || days < 1) return;
+    if (!Number.isInteger(days) || days < 1 || days > MAX_EXTEND_DAYS) return;
     extendTrial.mutate(
       { orgId: org._id, args: [{ extendDays: days }] },
       { onSuccess: close },
@@ -209,19 +263,24 @@ export function OrgActions({ org }: OrgActionsProps) {
           </DropdownMenuLabel>
           <DropdownMenuSeparator />
 
-          <DropdownMenuItem
-            onClick={() => {
-              setStatusValue(org.status as OrgStatus);
-              setDialog("status");
-            }}
-          >
-            {org.status === "suspended" ? (
+          {isLocked ? (
+            <DropdownMenuItem onClick={() => setPendingStatus("unsuspend")}>
               <Play className="w-4 h-4 mr-2" />
-            ) : (
+              {org.status === "deleted" ? "Restore (unsuspend)" : "Unsuspend"}
+            </DropdownMenuItem>
+          ) : (
+            <DropdownMenuItem onClick={() => setPendingStatus("suspended")}>
               <Pause className="w-4 h-4 mr-2" />
-            )}
-            Change status
-          </DropdownMenuItem>
+              Suspend
+            </DropdownMenuItem>
+          )}
+
+          {canEndTrial && (
+            <DropdownMenuItem onClick={() => setPendingStatus("expired")}>
+              <CalendarX className="w-4 h-4 mr-2" />
+              End trial now
+            </DropdownMenuItem>
+          )}
 
           <DropdownMenuItem
             onClick={() => {
@@ -233,15 +292,17 @@ export function OrgActions({ org }: OrgActionsProps) {
             Change plan
           </DropdownMenuItem>
 
-          <DropdownMenuItem
-            onClick={() => {
-              setExtendDays("30");
-              setDialog("trial");
-            }}
-          >
-            <CalendarPlus className="w-4 h-4 mr-2" />
-            Extend trial
-          </DropdownMenuItem>
+          {canExtendTrial && (
+            <DropdownMenuItem
+              onClick={() => {
+                setExtendDays("30");
+                setDialog("trial");
+              }}
+            >
+              <CalendarPlus className="w-4 h-4 mr-2" />
+              Extend trial
+            </DropdownMenuItem>
+          )}
 
           <DropdownMenuItem
             onClick={() => {
@@ -289,59 +350,68 @@ export function OrgActions({ org }: OrgActionsProps) {
 
           <DropdownMenuSeparator />
 
-          <DropdownMenuItem
-            onClick={() => {
-              setDeleteConfirm("");
-              setDialog("delete");
-            }}
-            className="text-destructive focus:text-destructive"
-          >
-            <Trash2 className="w-4 h-4 mr-2" />
-            Delete permanently
-          </DropdownMenuItem>
+          {org.status !== "deleted" && (
+            <DropdownMenuItem
+              onClick={() => setPendingStatus("deleted")}
+              className="text-destructive focus:text-destructive"
+            >
+              <Trash2 className="w-4 h-4 mr-2" />
+              Soft-delete
+            </DropdownMenuItem>
+          )}
+
+          {/* Hard delete is superadmin-only (403 INSUFFICIENT_ROLE). */}
+          {isSuperadmin && (
+            <DropdownMenuItem
+              onClick={() => {
+                setDeleteConfirm("");
+                setDialog("delete");
+              }}
+              className="text-destructive focus:text-destructive"
+            >
+              <Trash2 className="w-4 h-4 mr-2" />
+              Delete permanently
+            </DropdownMenuItem>
+          )}
         </DropdownMenuContent>
       </DropdownMenu>
 
-      {/* Status */}
-      <Dialog open={dialog === "status"} onOpenChange={(o) => !o && close()}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Change organization status</DialogTitle>
-            <DialogDescription>{org.name}</DialogDescription>
-          </DialogHeader>
-          <div className="py-4 space-y-2">
-            <Label className="text-xs text-muted-foreground uppercase tracking-wider">
-              New status
-            </Label>
-            <Select value={statusValue} onValueChange={(v) => setStatusValue(v as OrgStatus)}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="active">Active</SelectItem>
-                <SelectItem value="trial">Trial</SelectItem>
-                <SelectItem value="expired">Expired</SelectItem>
-                <SelectItem value="suspended">Suspended</SelectItem>
-                <SelectItem value="deleted">Deleted</SelectItem>
-              </SelectContent>
-            </Select>
-            <p className="text-xs text-muted-foreground">
-              Expired and Suspended both make the org read-only — uploads
-              blocked, existing data untouched. Expired shows an upgrade CTA,
-              Suspended points to support. Deleted hides the org but preserves
-              data.
-            </p>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={close}>
-              Cancel
-            </Button>
-            <Button onClick={submitStatus} disabled={updateStatus.isPending}>
-              {updateStatus.isPending ? "Saving…" : "Save status"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* Status change confirmation */}
+      <AlertDialog
+        open={pendingStatus !== null}
+        onOpenChange={(o) => !o && setPendingStatus(null)}
+      >
+        <AlertDialogContent>
+          {pendingStatus && (
+            <>
+              <AlertDialogHeader>
+                <AlertDialogTitle>
+                  {STATUS_ACTIONS[pendingStatus].title}
+                </AlertDialogTitle>
+                <AlertDialogDescription>
+                  <span className="font-medium text-foreground">
+                    {org.name}
+                  </span>{" "}
+                  · {STATUS_ACTIONS[pendingStatus].description}
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  className={cn(
+                    STATUS_ACTIONS[pendingStatus].destructive &&
+                      buttonVariants({ variant: "destructive" }),
+                  )}
+                  onClick={submitStatus}
+                  disabled={updateStatus.isPending}
+                >
+                  {STATUS_ACTIONS[pendingStatus].confirmLabel}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </>
+          )}
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Plan */}
       <Dialog open={dialog === "plan"} onOpenChange={(o) => !o && close()}>
@@ -405,16 +475,17 @@ export function OrgActions({ org }: OrgActionsProps) {
               id="extend-days"
               type="number"
               min={1}
+              max={MAX_EXTEND_DAYS}
               value={extendDays}
               onChange={(e) => setExtendDays(e.target.value)}
               placeholder="30"
             />
             <p className="text-xs text-muted-foreground">
-              Days count from the later of now and the current end date, so
-              extending an already-expired org grants real time. An expired org
-              is revived — uploads resume immediately — and the countdown
-              reminder emails fire again for the new window. Actively paying
-              orgs are never demoted. The owner is emailed about the extension.
+              Between 1 and {MAX_EXTEND_DAYS} days. Days count from the later
+              of now and the current end date, so extending an already-expired
+              org grants real time. An expired org is revived — uploads resume
+              immediately — and the countdown reminder emails fire again for
+              the new window. The owner is emailed about the extension.
             </p>
           </div>
           <DialogFooter>
@@ -426,7 +497,8 @@ export function OrgActions({ org }: OrgActionsProps) {
               disabled={
                 extendTrial.isPending ||
                 !Number.isInteger(Number(extendDays)) ||
-                Number(extendDays) < 1
+                Number(extendDays) < 1 ||
+                Number(extendDays) > MAX_EXTEND_DAYS
               }
             >
               {extendTrial.isPending ? "Extending…" : "Extend trial"}

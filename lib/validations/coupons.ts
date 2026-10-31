@@ -3,15 +3,15 @@ import type { CreateCouponBody } from "@/lib/api/coupons";
 
 export const couponFormSchema = z
   .object({
+    // Backend rule: trimmed and upper-cased, then ^[A-Z0-9]{3,40}$.
     code: z
       .string()
       .min(1, "Code is required")
-      .max(64, "Code must be 64 characters or fewer")
-      .regex(
-        /^[A-Za-z0-9_-]+$/,
-        "Letters, numbers, hyphens and underscores only",
+      .refine(
+        (s) => /^[A-Za-z0-9]{3,40}$/.test(s.trim()),
+        "3–40 letters and numbers only",
       ),
-    name: z.string().max(120, "Name must be 120 characters or fewer").optional(),
+    name: z.string().max(40, "Name must be 40 characters or fewer").optional(),
     discountType: z.enum(["percent", "amount"]),
     percentOff: z.string().optional(),
     amountOffDollars: z.string().optional(),
@@ -29,27 +29,33 @@ export const couponFormSchema = z
         ctx.addIssue({
           code: "custom",
           path: ["percentOff"],
-          message: "Enter a percentage between 1 and 100",
+          message: "Enter a percentage above 0 and up to 100",
         });
       }
     } else {
+      // Sent as a positive whole number of cents.
       const n = Number(v.amountOffDollars);
-      if (!v.amountOffDollars || !Number.isFinite(n) || n <= 0) {
+      if (
+        !v.amountOffDollars ||
+        !Number.isFinite(n) ||
+        n < 0.01 ||
+        !/^\d*(\.\d{1,2})?$/.test(v.amountOffDollars.trim())
+      ) {
         ctx.addIssue({
           code: "custom",
           path: ["amountOffDollars"],
-          message: "Enter an amount greater than 0",
+          message: "Enter an amount of at least 0.01, in whole cents",
         });
       }
     }
 
     if (v.duration === "repeating") {
       const n = Number(v.durationInMonths);
-      if (!v.durationInMonths || !Number.isInteger(n) || n < 1) {
+      if (!v.durationInMonths || !Number.isInteger(n) || n < 1 || n > 120) {
         ctx.addIssue({
           code: "custom",
           path: ["durationInMonths"],
-          message: "Months are required for repeating coupons",
+          message: "Enter 1–120 months for repeating coupons",
         });
       }
     }

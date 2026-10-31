@@ -9,13 +9,7 @@ import {
   type CreateCouponBody,
   type ListCouponsParams,
 } from "@/lib/api/coupons";
-
-function extractError(err: unknown, fallback: string): string {
-  const e = err as {
-    response?: { data?: { message?: string; error?: string } };
-  };
-  return e?.response?.data?.message ?? e?.response?.data?.error ?? fallback;
-}
+import { getApiErrorMessage } from "@/lib/api/errors";
 
 export function useCoupons(params: ListCouponsParams) {
   return useQuery({
@@ -41,7 +35,7 @@ export function useCreateCoupon() {
       qc.invalidateQueries({ queryKey: ["admin", "coupons"] });
     },
     onError: (err) => {
-      toast.error(extractError(err, "Failed to create coupon"));
+      toast.error(getApiErrorMessage(err, "Failed to create coupon"));
     },
   });
 }
@@ -58,7 +52,7 @@ export function useToggleCouponActive() {
       qc.invalidateQueries({ queryKey: ["admin", "coupons"] });
     },
     onError: (err) => {
-      toast.error(extractError(err, "Failed to update coupon"));
+      toast.error(getApiErrorMessage(err, "Failed to update coupon"));
     },
   });
 }
@@ -72,7 +66,7 @@ export function useDeleteCoupon() {
       qc.invalidateQueries({ queryKey: ["admin", "coupons"] });
     },
     onError: (err) => {
-      toast.error(extractError(err, "Failed to delete coupon"));
+      toast.error(getApiErrorMessage(err, "Failed to delete coupon"));
     },
   });
 }

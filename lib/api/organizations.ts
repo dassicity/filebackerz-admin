@@ -126,9 +126,20 @@ export interface OrgMutationResponse {
   message?: string;
 }
 
+// Values PUT /status accepts from the panel (Oct 2026 contract):
+// - "suspended" / "deleted": lock or soft-delete the org (delete cancels the
+//   Stripe subscription first).
+// - "unsuspend": only for suspended/deleted orgs; the status is restored from
+//   billing, so the response's data.status may be active, trial or expired.
+// - "expired": "end trial now", only for trial-plan orgs with no subscription
+//   or comp (409 CANNOT_EXPIRE otherwise).
+// "active" and "trial" are rejected on unlocked orgs (USE_COMP_ENDPOINT /
+// USE_TRIAL_ENDPOINT), so the panel never sends them.
+export type OrgStatusChange = "suspended" | "deleted" | "unsuspend" | "expired";
+
 export async function updateOrgStatus(
   orgId: string,
-  status: OrgStatus,
+  status: OrgStatusChange,
 ): Promise<OrgMutationResponse> {
   const { data } = await apiClient.put<OrgMutationResponse>(
     `/admin/organizations/${orgId}/status`,

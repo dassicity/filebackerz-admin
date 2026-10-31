@@ -35,14 +35,11 @@ export async function getSecurityAuditLogs(
   return data;
 }
 
-// The export endpoint only filters by these fields (§6.2); status, eventType,
-// userId and orgId are ignored server-side.
-export interface AuditLogsExportParams {
+// Since the Oct 2026 robustness pass the export honours the same filters as
+// the list (capped at 10,000 rows), so callers pass the list's current ones.
+export interface AuditLogsExportParams
+  extends Omit<CrossOrgAuditParams, "page" | "limit"> {
   format: "json" | "csv";
-  severity?: AuditSeverity;
-  category?: AuditCategory;
-  startDate?: string;
-  endDate?: string;
 }
 
 // Fetches the export through apiClient so the Bearer token is attached (a

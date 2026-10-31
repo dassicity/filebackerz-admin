@@ -135,9 +135,8 @@ function AuditLogsTab() {
   const [userIdInput, setUserIdInput] = useState("");
   const [orgIdInput, setOrgIdInput] = useState("");
 
-  const params: CrossOrgAuditParams = {
-    page,
-    limit: 20,
+  // Shared by the list and the export, which honours the same filters.
+  const filters: Omit<CrossOrgAuditParams, "page" | "limit"> = {
     severity: severity === ALL ? undefined : (severity as AuditSeverity),
     category: category === ALL ? undefined : (category as AuditCategory),
     status:
@@ -148,6 +147,7 @@ function AuditLogsTab() {
     userId: userIdInput || undefined,
     orgId: orgIdInput || undefined,
   };
+  const params: CrossOrgAuditParams = { page, limit: 20, ...filters };
 
   const {
     data,
@@ -170,18 +170,15 @@ function AuditLogsTab() {
   const exportMutation = useExportAuditLogs();
 
   const exportLogs = (format: "csv" | "json") =>
-    exportMutation.mutate({
-      format,
-      severity: severity === ALL ? undefined : (severity as AuditSeverity),
-      category: category === ALL ? undefined : (category as AuditCategory),
-    });
-
-  // The export endpoint only understands severity and category.
-  const hasUnexportableFilters =
-    status !== ALL || !!eventType || !!userIdInput || !!orgIdInput;
+    exportMutation.mutate({ format, ...filters });
 
   const hasFilters =
-    severity !== ALL || category !== ALL || hasUnexportableFilters;
+    severity !== ALL ||
+    category !== ALL ||
+    status !== ALL ||
+    !!eventType ||
+    !!userIdInput ||
+    !!orgIdInput;
 
   const columns: Column<AuditLogEntry>[] = [
     {
@@ -373,13 +370,9 @@ function AuditLogsTab() {
               JSON
             </Button>
           </div>
-          {hasUnexportableFilters && (
-            <p className="text-xs text-muted-foreground text-right">
-              Exports apply only the severity and category filters. Status,
-              event type, user and org filters are not included (max 10,000
-              records).
-            </p>
-          )}
+          <p className="text-xs text-muted-foreground text-right">
+            Exports use the current filters, up to 10,000 records.
+          </p>
         </CardContent>
       </Card>
 

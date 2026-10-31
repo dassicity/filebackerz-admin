@@ -22,7 +22,7 @@ import {
   type ListMembersParams,
   type OrgAuditLogsParams,
   type OrgPlan,
-  type OrgStatus,
+  type OrgStatusChange,
   type UpdateOrgSettingsBody,
 } from "@/lib/api/organizations";
 
@@ -115,16 +115,20 @@ function handleError(err: unknown): string {
   );
 }
 
-function useOrgMutation<Args extends unknown[]>(
-  mutationFn: (orgId: string, ...args: Args) => Promise<unknown>,
-  successMessage: string,
+function useOrgMutation<Args extends unknown[], Result = unknown>(
+  mutationFn: (orgId: string, ...args: Args) => Promise<Result>,
+  successMessage: string | ((result: Result) => string),
 ) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ orgId, args }: { orgId: string; args: Args }) =>
       mutationFn(orgId, ...args),
-    onSuccess: (_data, variables) => {
-      toast.success(successMessage);
+    onSuccess: (data, variables) => {
+      toast.success(
+        typeof successMessage === "function"
+          ? successMessage(data)
+          : successMessage,
+      );
       qc.invalidateQueries({ queryKey: ["admin", "organizations"] });
       qc.invalidateQueries({
         queryKey: ["admin", "organizations", "detail", variables.orgId],
@@ -136,8 +140,10 @@ function useOrgMutation<Args extends unknown[]>(
 
 export function useUpdateOrgStatus() {
   return useOrgMutation(
-    (orgId: string, status: OrgStatus) => updateOrgStatus(orgId, status),
-    "Organization status updated",
+    (orgId: string, status: OrgStatusChange) => updateOrgStatus(orgId, status),
+    // Unsuspend restores the status from billing, which can differ from what
+    // the admin expected, so always report the status the server settled on.
+    (res) => `Organization is now ${res.data.status}`,
   );
 }
 
@@ -201,6 +207,11 @@ export function useDeleteOrganization() {
       toast.success("Organization permanently deleted");
       qc.invalidateQueries({ queryKey: ["admin", "organizations"] });
     },
-    onError: (err) => toast.error(handleError(err)),
+    onError: (err) => {
+      toast.error(handleError(err));
+      // A 502 STORAGE_DELETE_FAILED has already set the org to "deleted"
+      // (safe to retry), so refresh to show that state.
+      qc.invalidateQueries({ queryKey: ["admin", "organizations"] });
+    },
   });
 }
