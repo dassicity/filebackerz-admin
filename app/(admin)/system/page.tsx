@@ -19,6 +19,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { PageHeader } from "@/components/common/page-header";
+import { ErrorCard } from "@/components/common/error-state";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
@@ -28,6 +29,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { FieldError } from "@/components/common/field-error";
 import {
   usePlatformConfig,
   useUpdatePlatformConfig,
@@ -44,6 +46,10 @@ import type {
   ServiceStatus,
 } from "@/lib/api/system";
 import { formatBytes, formatRelative } from "@/lib/formatters";
+import {
+  parseNumberField,
+  type NumberFieldRule,
+} from "@/lib/validations/number-field";
 import { cn } from "@/lib/utils";
 
 const GB = 1024 * 1024 * 1024;
@@ -95,7 +101,11 @@ export default function SystemPage() {
 // ---- Health ----
 
 function HealthTab() {
-  const { data, isLoading, refetch, isFetching } = useSystemHealth();
+  const { data, isLoading, error, refetch, isFetching } = useSystemHealth();
+
+  if (error && !data) {
+    return <ErrorCard error={error} onRetry={refetch} />;
+  }
 
   return (
     <div className="space-y-4">
@@ -348,12 +358,16 @@ const FLAG_META: Array<{
 ];
 
 function FeatureFlagsTab() {
-  const { data, isLoading } = useFeatureFlags();
+  const { data, isLoading, error, refetch } = useFeatureFlags();
   const mutation = useUpdateFeatureFlags();
 
   const onToggle = (key: keyof FeatureFlags, value: boolean) => {
     mutation.mutate({ [key]: value } as Partial<FeatureFlags>);
   };
+
+  if (error && !data) {
+    return <ErrorCard error={error} onRetry={refetch} />;
+  }
 
   return (
     <Card>
@@ -396,7 +410,7 @@ function FeatureFlagsTab() {
 // ---- Maintenance ----
 
 function MaintenanceTab() {
-  const { data, isLoading } = usePlatformConfig();
+  const { data, isLoading, error, refetch } = usePlatformConfig();
   const mutation = useToggleMaintenance();
 
   const [message, setMessage] = useState("");
@@ -413,6 +427,10 @@ function MaintenanceTab() {
       message: enabled ? message : undefined,
     });
   };
+
+  if (error && !data) {
+    return <ErrorCard error={error} onRetry={refetch} />;
+  }
 
   return (
     <Card>
@@ -499,16 +517,70 @@ function MaintenanceTab() {
 
 // ---- Full config ----
 
+type GlobalForm = {
+  maxUploadSizeGB: string;
+  defaultTrashRetention: string;
+  trialDays: string;
+  signupEnabled: boolean;
+};
+
+type SecurityForm = {
+  maxFailedLogins: string;
+  lockoutDuration: string;
+  sessionTimeout: string;
+  passwordMinLength: string;
+  requireEmailVerification: boolean;
+  ipBlocklist: string;
+  allowedCorsOrigins: string;
+};
+
+type ConfigNumberField =
+  | "maxUploadSizeGB"
+  | "defaultTrashRetention"
+  | "trialDays"
+  | "maxFailedLogins"
+  | "lockoutDuration"
+  | "sessionTimeout"
+  | "passwordMinLength";
+
+type ConfigErrors = Partial<Record<ConfigNumberField, string>>;
+
+const CONFIG_RULES: Record<ConfigNumberField, NumberFieldRule> = {
+  maxUploadSizeGB: { label: "Max upload size", greaterThan: 0 },
+  defaultTrashRetention: { label: "Trash retention", min: 1, integer: true },
+  trialDays: { label: "Trial length", min: 1, integer: true },
+  maxFailedLogins: { label: "Max failed logins", min: 1, integer: true },
+  lockoutDuration: { label: "Lockout duration", min: 1, integer: true },
+  sessionTimeout: { label: "Session timeout", min: 1, integer: true },
+  passwordMinLength: { label: "Password min length", min: 1, integer: true },
+};
+
+function globalFormFrom(g: GlobalSettings): GlobalForm {
+  return {
+    maxUploadSizeGB: String(Math.round((g.maxUploadSize / GB) * 100) / 100),
+    defaultTrashRetention: String(g.defaultTrashRetention),
+    trialDays: g.trialDays != null ? String(g.trialDays) : "",
+    signupEnabled: g.signupEnabled,
+  };
+}
+
+function securityFormFrom(s: SecuritySettings): SecurityForm {
+  return {
+    maxFailedLogins: String(s.maxFailedLogins),
+    lockoutDuration: String(s.lockoutDuration),
+    sessionTimeout: String(s.sessionTimeout),
+    passwordMinLength: String(s.passwordMinLength),
+    requireEmailVerification: s.requireEmailVerification,
+    ipBlocklist: (s.ipBlocklist ?? []).join(", "),
+    allowedCorsOrigins: (s.allowedCorsOrigins ?? []).join(", "),
+  };
+}
+
 function ConfigTab() {
-  const { data, isLoading } = usePlatformConfig();
+  const { data, isLoading, error, refetch } = usePlatformConfig();
   const mutation = useUpdatePlatformConfig();
 
-  const [globalForm, setGlobalForm] = useState<{
-    maxUploadSizeGB: string;
-    defaultTrashRetention: string;
-    trialDays: string;
-    signupEnabled: boolean;
-  }>({
+  const [globalForm, setGlobalForm] = useState<GlobalForm>({
     maxUploadSizeGB: "",
     defaultTrashRetention: "",
     trialDays: "",
@@ -524,15 +596,7 @@ function ConfigTab() {
     sendShareNotificationEmail: true,
   });
 
-  const [securityForm, setSecurityForm] = useState<{
-    maxFailedLogins: string;
-    lockoutDuration: string;
-    sessionTimeout: string;
-    passwordMinLength: string;
-    requireEmailVerification: boolean;
-    ipBlocklist: string;
-    allowedCorsOrigins: string;
-  }>({
+  const [securityForm, setSecurityForm] = useState<SecurityForm>({
     maxFailedLogins: "",
     lockoutDuration: "",
     sessionTimeout: "",
@@ -542,50 +606,130 @@ function ConfigTab() {
     allowedCorsOrigins: "",
   });
 
+  const [errors, setErrors] = useState<ConfigErrors>({});
+
   useEffect(() => {
     if (!data) return;
-    setGlobalForm({
-      maxUploadSizeGB: String(
-        Math.round((data.globalSettings.maxUploadSize / GB) * 100) / 100,
-      ),
-      defaultTrashRetention: String(data.globalSettings.defaultTrashRetention),
-      trialDays: String(data.globalSettings.trialDays ?? ""),
-      signupEnabled: data.globalSettings.signupEnabled,
-    });
+    setGlobalForm(globalFormFrom(data.globalSettings));
     setEmailForm({ ...data.emailSettings });
-    setSecurityForm({
-      maxFailedLogins: String(data.securitySettings.maxFailedLogins),
-      lockoutDuration: String(data.securitySettings.lockoutDuration),
-      sessionTimeout: String(data.securitySettings.sessionTimeout),
-      passwordMinLength: String(data.securitySettings.passwordMinLength),
-      requireEmailVerification: data.securitySettings.requireEmailVerification,
-      ipBlocklist: (data.securitySettings.ipBlocklist ?? []).join(", "),
-      allowedCorsOrigins: (data.securitySettings.allowedCorsOrigins ?? []).join(
-        ", ",
-      ),
-    });
+    setSecurityForm(securityFormFrom(data.securitySettings));
+    setErrors({});
   }, [data]);
+
+  const editGlobal = (patch: Partial<GlobalForm>) => {
+    setGlobalForm((f) => ({ ...f, ...patch }));
+    setErrors((e) => ({ ...e, ...clearedErrors(patch) }));
+  };
+
+  const editSecurity = (patch: Partial<SecurityForm>) => {
+    setSecurityForm((f) => ({ ...f, ...patch }));
+    setErrors((e) => ({ ...e, ...clearedErrors(patch) }));
+  };
 
   const save = () => {
     if (!data) return;
+    const nextErrors: ConfigErrors = {};
+    const baselineGlobal = globalFormFrom(data.globalSettings);
+    const baselineSecurity = securityFormFrom(data.securitySettings);
+
+    // An untouched field keeps the server's exact value, so display rounding
+    // (GB to 2 decimals) or a value the server didn't return is never written
+    // back. Edited fields must pass validation; blank is never coerced to 0.
+    const numberField = (
+      field: ConfigNumberField,
+      raw: string,
+      baseline: string,
+      serverValue: number | undefined,
+      toApi: (n: number) => number = (n) => n,
+    ): number | undefined => {
+      if (raw.trim() === baseline) return serverValue;
+      const parsed = parseNumberField(raw, CONFIG_RULES[field]);
+      if (parsed.error !== undefined) {
+        nextErrors[field] = parsed.error;
+        return serverValue;
+      }
+      return toApi(parsed.value);
+    };
+
+    const prevGlobal = data.globalSettings;
+    const nextGlobal: Partial<GlobalSettings> = {
+      maxUploadSize: numberField(
+        "maxUploadSizeGB",
+        globalForm.maxUploadSizeGB,
+        baselineGlobal.maxUploadSizeGB,
+        prevGlobal.maxUploadSize,
+        (n) => Math.round(n * GB),
+      ),
+      defaultTrashRetention: numberField(
+        "defaultTrashRetention",
+        globalForm.defaultTrashRetention,
+        baselineGlobal.defaultTrashRetention,
+        prevGlobal.defaultTrashRetention,
+      ),
+      trialDays: numberField(
+        "trialDays",
+        globalForm.trialDays,
+        baselineGlobal.trialDays,
+        prevGlobal.trialDays,
+      ),
+      signupEnabled: globalForm.signupEnabled,
+    };
+    if (nextGlobal.trialDays === undefined) delete nextGlobal.trialDays;
+
+    const prevSecurity = data.securitySettings;
+    const nextSecurity: Partial<SecuritySettings> = {
+      maxFailedLogins: numberField(
+        "maxFailedLogins",
+        securityForm.maxFailedLogins,
+        baselineSecurity.maxFailedLogins,
+        prevSecurity.maxFailedLogins,
+      ),
+      lockoutDuration: numberField(
+        "lockoutDuration",
+        securityForm.lockoutDuration,
+        baselineSecurity.lockoutDuration,
+        prevSecurity.lockoutDuration,
+      ),
+      sessionTimeout: numberField(
+        "sessionTimeout",
+        securityForm.sessionTimeout,
+        baselineSecurity.sessionTimeout,
+        prevSecurity.sessionTimeout,
+      ),
+      passwordMinLength: numberField(
+        "passwordMinLength",
+        securityForm.passwordMinLength,
+        baselineSecurity.passwordMinLength,
+        prevSecurity.passwordMinLength,
+      ),
+      requireEmailVerification: securityForm.requireEmailVerification,
+      ipBlocklist: securityForm.ipBlocklist
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean),
+      allowedCorsOrigins: securityForm.allowedCorsOrigins
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean),
+    };
+
+    setErrors(nextErrors);
+    if (Object.keys(nextErrors).length > 0) {
+      toast.error("Fix the highlighted fields before saving.");
+      return;
+    }
+
     const next: {
       globalSettings?: Partial<GlobalSettings>;
       emailSettings?: Partial<EmailSettings>;
       securitySettings?: Partial<SecuritySettings>;
     } = {};
 
-    const nextGlobal: Partial<GlobalSettings> = {
-      maxUploadSize: Math.round(Number(globalForm.maxUploadSizeGB || 0) * GB),
-      defaultTrashRetention: Number(globalForm.defaultTrashRetention || 0),
-      trialDays: Number(globalForm.trialDays || 0),
-      signupEnabled: globalForm.signupEnabled,
-    };
     if (
-      nextGlobal.maxUploadSize !== data.globalSettings.maxUploadSize ||
-      nextGlobal.defaultTrashRetention !==
-        data.globalSettings.defaultTrashRetention ||
-      nextGlobal.trialDays !== data.globalSettings.trialDays ||
-      nextGlobal.signupEnabled !== data.globalSettings.signupEnabled
+      nextGlobal.maxUploadSize !== prevGlobal.maxUploadSize ||
+      nextGlobal.defaultTrashRetention !== prevGlobal.defaultTrashRetention ||
+      nextGlobal.trialDays !== prevGlobal.trialDays ||
+      nextGlobal.signupEnabled !== prevGlobal.signupEnabled
     ) {
       next.globalSettings = nextGlobal;
     }
@@ -604,22 +748,6 @@ function ConfigTab() {
       next.emailSettings = emailForm;
     }
 
-    const nextSecurity: Partial<SecuritySettings> = {
-      maxFailedLogins: Number(securityForm.maxFailedLogins || 0),
-      lockoutDuration: Number(securityForm.lockoutDuration || 0),
-      sessionTimeout: Number(securityForm.sessionTimeout || 0),
-      passwordMinLength: Number(securityForm.passwordMinLength || 0),
-      requireEmailVerification: securityForm.requireEmailVerification,
-      ipBlocklist: securityForm.ipBlocklist
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean),
-      allowedCorsOrigins: securityForm.allowedCorsOrigins
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean),
-    };
-    const prevSecurity = data.securitySettings;
     const securityChanged =
       nextSecurity.maxFailedLogins !== prevSecurity.maxFailedLogins ||
       nextSecurity.lockoutDuration !== prevSecurity.lockoutDuration ||
@@ -639,6 +767,10 @@ function ConfigTab() {
     }
     mutation.mutate(next);
   };
+
+  if (error && !data) {
+    return <ErrorCard error={error} onRetry={refetch} />;
+  }
 
   if (isLoading || !data) {
     return (
@@ -668,14 +800,15 @@ function ConfigTab() {
               type="number"
               min={0}
               step={0.5}
+              className={cn(
+                errors.maxUploadSizeGB &&
+                  "border-destructive focus-visible:ring-destructive",
+              )}
+              aria-invalid={!!errors.maxUploadSizeGB}
               value={globalForm.maxUploadSizeGB}
-              onChange={(e) =>
-                setGlobalForm((f) => ({
-                  ...f,
-                  maxUploadSizeGB: e.target.value,
-                }))
-              }
+              onChange={(e) => editGlobal({ maxUploadSizeGB: e.target.value })}
             />
+            <FieldError message={errors.maxUploadSizeGB} />
             <p className="text-xs text-muted-foreground">
               {Number(globalForm.maxUploadSizeGB) > 0
                 ? `= ${formatBytes(Number(globalForm.maxUploadSizeGB) * GB)}`
@@ -689,14 +822,17 @@ function ConfigTab() {
               id="trash-retention"
               type="number"
               min={0}
+              className={cn(
+                errors.defaultTrashRetention &&
+                  "border-destructive focus-visible:ring-destructive",
+              )}
+              aria-invalid={!!errors.defaultTrashRetention}
               value={globalForm.defaultTrashRetention}
               onChange={(e) =>
-                setGlobalForm((f) => ({
-                  ...f,
-                  defaultTrashRetention: e.target.value,
-                }))
+                editGlobal({ defaultTrashRetention: e.target.value })
               }
             />
+            <FieldError message={errors.defaultTrashRetention} />
           </div>
 
           <div className="space-y-1.5">
@@ -705,14 +841,15 @@ function ConfigTab() {
               id="trial-days"
               type="number"
               min={0}
+              className={cn(
+                errors.trialDays &&
+                  "border-destructive focus-visible:ring-destructive",
+              )}
+              aria-invalid={!!errors.trialDays}
               value={globalForm.trialDays}
-              onChange={(e) =>
-                setGlobalForm((f) => ({
-                  ...f,
-                  trialDays: e.target.value,
-                }))
-              }
+              onChange={(e) => editGlobal({ trialDays: e.target.value })}
             />
+            <FieldError message={errors.trialDays} />
             <p className="text-xs text-muted-foreground">
               Free window for new organizations. Quotas and overage pricing
               live in Plans &amp; Billing → Plan defaults.
@@ -816,14 +953,17 @@ function ConfigTab() {
                 id="max-failed"
                 type="number"
                 min={0}
+                className={cn(
+                  errors.maxFailedLogins &&
+                    "border-destructive focus-visible:ring-destructive",
+                )}
+                aria-invalid={!!errors.maxFailedLogins}
                 value={securityForm.maxFailedLogins}
                 onChange={(e) =>
-                  setSecurityForm((f) => ({
-                    ...f,
-                    maxFailedLogins: e.target.value,
-                  }))
+                  editSecurity({ maxFailedLogins: e.target.value })
                 }
               />
+              <FieldError message={errors.maxFailedLogins} />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="lockout">Lockout duration (minutes)</Label>
@@ -831,14 +971,17 @@ function ConfigTab() {
                 id="lockout"
                 type="number"
                 min={0}
+                className={cn(
+                  errors.lockoutDuration &&
+                    "border-destructive focus-visible:ring-destructive",
+                )}
+                aria-invalid={!!errors.lockoutDuration}
                 value={securityForm.lockoutDuration}
                 onChange={(e) =>
-                  setSecurityForm((f) => ({
-                    ...f,
-                    lockoutDuration: e.target.value,
-                  }))
+                  editSecurity({ lockoutDuration: e.target.value })
                 }
               />
+              <FieldError message={errors.lockoutDuration} />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="session-to">Session timeout (minutes)</Label>
@@ -846,14 +989,17 @@ function ConfigTab() {
                 id="session-to"
                 type="number"
                 min={0}
+                className={cn(
+                  errors.sessionTimeout &&
+                    "border-destructive focus-visible:ring-destructive",
+                )}
+                aria-invalid={!!errors.sessionTimeout}
                 value={securityForm.sessionTimeout}
                 onChange={(e) =>
-                  setSecurityForm((f) => ({
-                    ...f,
-                    sessionTimeout: e.target.value,
-                  }))
+                  editSecurity({ sessionTimeout: e.target.value })
                 }
               />
+              <FieldError message={errors.sessionTimeout} />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="pwd-min">Password min length</Label>
@@ -861,14 +1007,17 @@ function ConfigTab() {
                 id="pwd-min"
                 type="number"
                 min={0}
+                className={cn(
+                  errors.passwordMinLength &&
+                    "border-destructive focus-visible:ring-destructive",
+                )}
+                aria-invalid={!!errors.passwordMinLength}
                 value={securityForm.passwordMinLength}
                 onChange={(e) =>
-                  setSecurityForm((f) => ({
-                    ...f,
-                    passwordMinLength: e.target.value,
-                  }))
+                  editSecurity({ passwordMinLength: e.target.value })
                 }
               />
+              <FieldError message={errors.passwordMinLength} />
             </div>
           </div>
 
@@ -923,6 +1072,11 @@ function ConfigTab() {
       </div>
     </div>
   );
+}
+
+// Maps edited form keys to `undefined` so their validation errors clear.
+function clearedErrors(patch: object): ConfigErrors {
+  return Object.fromEntries(Object.keys(patch).map((k) => [k, undefined]));
 }
 
 function ToggleRow({

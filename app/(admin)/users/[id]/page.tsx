@@ -12,6 +12,8 @@ import {
   Loader2,
 } from "lucide-react";
 import { PageHeader } from "@/components/common/page-header";
+import { ErrorCard } from "@/components/common/error-state";
+import { isNotFoundError } from "@/lib/api/errors";
 import { DataTable, type Column } from "@/components/common/data-table";
 import { PaginationBar } from "@/components/common/pagination-bar";
 import {
@@ -41,12 +43,25 @@ export default function UserDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = use(params);
-  const { data: user, isLoading, error } = useUser(id);
+  const { data: user, isLoading, error, refetch } = useUser(id);
 
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-24">
         <Loader2 className="w-6 h-6 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  if (error && !user && !isNotFoundError(error)) {
+    return (
+      <div>
+        <PageHeader title="User" />
+        <ErrorCard
+          error={error}
+          onRetry={refetch}
+          title="Couldn't load this user"
+        />
       </div>
     );
   }
@@ -229,7 +244,7 @@ function StatCard({
 }
 
 function OrganizationsTab({ userId }: { userId: string }) {
-  const { data, isLoading } = useUserOrganizations(userId);
+  const { data, isLoading, error, refetch } = useUserOrganizations(userId);
   const rows = data?.organizations ?? [];
 
   const columns: Column<(typeof rows)[number]>[] = [
@@ -297,6 +312,8 @@ function OrganizationsTab({ userId }: { userId: string }) {
           columns={columns}
           rows={rows}
           loading={isLoading}
+          error={error}
+          onRetry={refetch}
           rowKey={(r) => r.membership._id}
           emptyState={
             <div className="py-12 text-center">
@@ -315,7 +332,7 @@ function OrganizationsTab({ userId }: { userId: string }) {
 }
 
 function SessionsTab({ userId }: { userId: string }) {
-  const { data, isLoading } = useUserSessions(userId);
+  const { data, isLoading, error, refetch } = useUserSessions(userId);
   const rows = data?.sessions ?? [];
 
   const columns: Column<UserDevice>[] = [
@@ -386,6 +403,8 @@ function SessionsTab({ userId }: { userId: string }) {
           columns={columns}
           rows={rows}
           loading={isLoading}
+          error={error}
+          onRetry={refetch}
           rowKey={(d) => d.deviceId}
           emptyState={
             <div className="py-12 text-center">
@@ -405,7 +424,13 @@ function SessionsTab({ userId }: { userId: string }) {
 
 function AuditTab({ userId }: { userId: string }) {
   const [page, setPage] = useState(1);
-  const { data, isLoading, isFetching } = useUserAuditLogs(userId, {
+  const {
+    data,
+    isLoading,
+    error,
+    refetch,
+    isFetching,
+  } = useUserAuditLogs(userId, {
     page,
     limit: 15,
   });
@@ -462,6 +487,8 @@ function AuditTab({ userId }: { userId: string }) {
           columns={columns}
           rows={data?.data}
           loading={isLoading}
+          error={error}
+          onRetry={refetch}
           rowKey={(l) => l._id}
           emptyState={
             <div className="py-12 text-center">

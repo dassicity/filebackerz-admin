@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { ErrorState } from "@/components/common/error-state";
 import { useCoupon } from "@/lib/hooks/use-coupons";
 import { formatNumber, formatRelative } from "@/lib/formatters";
 import { CouponActions } from "./coupon-actions";
@@ -27,7 +28,7 @@ interface Props {
 
 export function CouponDetailDialog({ couponId, onClose }: Props) {
   const open = !!couponId;
-  const { data, isLoading } = useCoupon(couponId ?? undefined);
+  const { data, isLoading, error, refetch } = useCoupon(couponId ?? undefined);
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
@@ -48,7 +49,9 @@ export function CouponDetailDialog({ couponId, onClose }: Props) {
           <DialogDescription>{data?.name ?? "—"}</DialogDescription>
         </DialogHeader>
 
-        {isLoading || !data ? (
+        {error && !data ? (
+          <ErrorState error={error} onRetry={refetch} />
+        ) : isLoading || !data ? (
           <div className="flex items-center justify-center py-10">
             <Loader2 className="w-5 h-5 animate-spin text-primary" />
           </div>

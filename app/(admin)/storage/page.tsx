@@ -10,6 +10,7 @@ import {
   TrendingUp,
 } from "lucide-react";
 import { PageHeader } from "@/components/common/page-header";
+import { ErrorCard } from "@/components/common/error-state";
 import { DataTable, type Column } from "@/components/common/data-table";
 import { PaginationBar } from "@/components/common/pagination-bar";
 import {
@@ -92,7 +93,11 @@ export default function StoragePage() {
 }
 
 function OverviewTab() {
-  const { data, isLoading } = useStorageOverview(10);
+  const { data, isLoading, error, refetch } = useStorageOverview(10);
+
+  if (error && !data) {
+    return <ErrorCard error={error} onRetry={refetch} />;
+  }
 
   return (
     <div className="space-y-4">
@@ -151,6 +156,8 @@ function OverviewTab() {
         <CardContent className="p-0">
           <DataTable
             loading={isLoading}
+            error={error}
+            onRetry={refetch}
             rows={data?.topConsumers}
             rowKey={(c) => c._id}
             columns={[
@@ -297,7 +304,7 @@ function OverviewTab() {
 
 function TopConsumersTab() {
   const [limit, setLimit] = useState(20);
-  const { data, isLoading } = useTopConsumers(limit);
+  const { data, isLoading, error, refetch } = useTopConsumers(limit);
 
   const columns: Column<TopConsumer>[] = [
     {
@@ -397,6 +404,8 @@ function TopConsumersTab() {
             columns={columns}
             rows={data}
             loading={isLoading}
+            error={error}
+            onRetry={refetch}
             rowKey={(c) => c._id}
           />
         </CardContent>
@@ -423,7 +432,13 @@ function ConnectionsTab() {
       status === ALL ? undefined : (status as ListConnectionsParams["status"]),
   };
 
-  const { data, isLoading, isFetching } = useStorageConnections(params);
+  const {
+    data,
+    isLoading,
+    error,
+    refetch,
+    isFetching,
+  } = useStorageConnections(params);
 
   const columns: Column<AdminStorageConnection>[] = [
     {
@@ -537,6 +552,8 @@ function ConnectionsTab() {
               columns={columns}
               rows={data?.data}
               loading={isLoading}
+              error={error}
+              onRetry={refetch}
               rowKey={(c) => c._id}
               onRowClick={(c) => setDetailId(c._id)}
               emptyState={
@@ -569,7 +586,11 @@ function ConnectionsTab() {
 }
 
 function InternalTab() {
-  const { data, isLoading } = useInternalStorage();
+  const { data, isLoading, error, refetch } = useInternalStorage();
+
+  if (error && !data) {
+    return <ErrorCard error={error} onRetry={refetch} />;
+  }
 
   return (
     <div className="space-y-4">
@@ -605,6 +626,8 @@ function InternalTab() {
         <CardContent className="p-0">
           <DataTable
             loading={isLoading}
+            error={error}
+            onRetry={refetch}
             rows={data?.organizations}
             rowKey={(o) => o._id}
             columns={[
@@ -662,6 +685,8 @@ function InternalTab() {
         <CardContent className="p-0">
           <DataTable
             loading={isLoading}
+            error={error}
+            onRetry={refetch}
             rows={data?.topMimeTypes}
             rowKey={(m) => m.mimeType}
             columns={[

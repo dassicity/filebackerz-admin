@@ -2,6 +2,7 @@
 
 import React from "react";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ErrorState } from "@/components/common/error-state";
 import { cn } from "@/lib/utils";
 
 export interface Column<T> {
@@ -20,6 +21,9 @@ interface DataTableProps<T> {
   onRowClick?: (row: T) => void;
   emptyState?: React.ReactNode;
   skeletonRows?: number;
+  /** Query error; shown instead of the empty state when there are no rows. */
+  error?: unknown;
+  onRetry?: () => unknown;
 }
 
 export function DataTable<T>({
@@ -30,6 +34,8 @@ export function DataTable<T>({
   onRowClick,
   emptyState,
   skeletonRows = 8,
+  error,
+  onRetry,
 }: DataTableProps<T>) {
   return (
     <div className="overflow-x-auto scrollbar-thin">
@@ -58,6 +64,14 @@ export function DataTable<T>({
                   </td>
                 </tr>
               ))
+            : error && (!rows || rows.length === 0)
+              ? (
+                <tr>
+                  <td colSpan={columns.length}>
+                    <ErrorState error={error} onRetry={onRetry} />
+                  </td>
+                </tr>
+              )
             : !rows || rows.length === 0
               ? (
                 <tr>

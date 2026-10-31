@@ -1,4 +1,5 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { toast } from "sonner";
 import {
   getSecurityAuditLogs,
   getSecurityAlerts,
@@ -6,13 +7,25 @@ import {
   getSecurityAnomalies,
   getActiveSessions,
   getTwoFaStats,
+  downloadAuditLogsExport,
+  type AuditLogsExportParams,
   type CrossOrgAuditParams,
 } from "@/lib/api/security";
+import { getApiErrorMessage } from "@/lib/api/errors";
 
 export function useSecurityAuditLogs(params: CrossOrgAuditParams) {
   return useQuery({
     queryKey: ["admin", "security", "audit-logs", params],
     queryFn: async () => await getSecurityAuditLogs(params),
+  });
+}
+
+export function useExportAuditLogs() {
+  return useMutation({
+    mutationFn: async (params: AuditLogsExportParams) =>
+      downloadAuditLogsExport(params),
+    onError: (err) =>
+      toast.error(getApiErrorMessage(err, "Failed to export audit logs")),
   });
 }
 

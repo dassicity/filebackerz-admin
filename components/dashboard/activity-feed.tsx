@@ -18,6 +18,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ErrorState } from "@/components/common/error-state";
 import { useActivity, type ActivityParams } from "@/lib/hooks/use-dashboard";
 import type {
   AuditCategory,
@@ -80,7 +81,7 @@ export function ActivityFeed() {
     category: category === ALL ? undefined : (category as AuditCategory),
   };
 
-  const { data, isLoading, isFetching } = useActivity(params);
+  const { data, isLoading, error, refetch, isFetching } = useActivity(params);
 
   const logs = data?.logs ?? [];
   const pagination = data?.pagination;
@@ -175,6 +176,14 @@ export function ActivityFeed() {
                       </td>
                     </tr>
                   ))
+                : error && !data
+                  ? [
+                      <tr key="error">
+                        <td colSpan={6}>
+                          <ErrorState error={error} onRetry={refetch} />
+                        </td>
+                      </tr>,
+                    ]
                 : logs.length === 0
                   ? [
                       <tr key="empty">

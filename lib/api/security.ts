@@ -35,24 +35,55 @@ export async function getSecurityAuditLogs(
   return data;
 }
 
-export function getAuditLogsExportUrl(
-  params: {
-    format?: "json" | "csv";
-    severity?: AuditSeverity;
-    category?: AuditCategory;
-    startDate?: string;
-    endDate?: string;
-  } = {},
-): string {
-  const base =
-    (process.env.NEXT_PUBLIC_API_URL || "https://api.filebackerz.com") +
-    "/api/admin/security/audit-logs/export";
-  const qs = new URLSearchParams();
-  Object.entries(params).forEach(([k, v]) => {
-    if (v != null && v !== "") qs.set(k, String(v));
-  });
-  const search = qs.toString();
-  return search ? `${base}?${search}` : base;
+// The export endpoint only filters by these fields (§6.2); status, eventType,
+// userId and orgId are ignored server-side.
+export interface AuditLogsExportParams {
+  format: "json" | "csv";
+  severity?: AuditSeverity;
+  category?: AuditCategory;
+  startDate?: string;
+  endDate?: string;
+}
+
+// Fetches the export through apiClient so the Bearer token is attached (a
+// plain window.open navigation would go out unauthenticated), then hands the
+// file to the browser as a download.
+export async function downloadAuditLogsExport(
+  params: AuditLogsExportParams,
+): Promise<void> {
+  let response;
+  try {
+    response = await apiClient.get<Blob>("/admin/security/audit-logs/export", {
+      params,
+      responseType: "blob",
+    });
+  } catch (err) {
+    // With responseType "blob" the JSON error body arrives as a Blob too;
+    // decode it so callers can read `error` / `message` as usual.
+    const res = (err as { response?: { data?: unknown } }).response;
+    if (res?.data instanceof Blob) {
+      try {
+        res.data = JSON.parse(await res.data.text());
+      } catch {
+        res.data = undefined;
+      }
+    }
+    throw err;
+  }
+
+  const disposition = String(response.headers["content-disposition"] ?? "");
+  const filename =
+    /filename="?([^";]+)"?/i.exec(disposition)?.[1] ??
+    `audit-logs.${params.format}`;
+
+  const url = URL.createObjectURL(response.data);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
 
 export interface SecurityAlertsResponse {

@@ -10,9 +10,11 @@ import {
   Monitor,
   ShieldCheck,
   Download,
+  Loader2,
   X,
 } from "lucide-react";
 import { PageHeader } from "@/components/common/page-header";
+import { ErrorCard } from "@/components/common/error-state";
 import { DataTable, type Column } from "@/components/common/data-table";
 import { PaginationBar } from "@/components/common/pagination-bar";
 import {
@@ -40,8 +42,8 @@ import {
   useSecurityAnomalies,
   useActiveSessionsStats,
   useTwoFaStats,
+  useExportAuditLogs,
 } from "@/lib/hooks/use-security";
-import { getAuditLogsExportUrl } from "@/lib/api/security";
 import type {
   AuditCategory,
   AuditLogEntry,
@@ -147,7 +149,13 @@ function AuditLogsTab() {
     orgId: orgIdInput || undefined,
   };
 
-  const { data, isLoading, isFetching } = useSecurityAuditLogs(params);
+  const {
+    data,
+    isLoading,
+    error,
+    refetch,
+    isFetching,
+  } = useSecurityAuditLogs(params);
 
   const reset = () => {
     setSeverity(ALL);
@@ -159,31 +167,21 @@ function AuditLogsTab() {
     setPage(1);
   };
 
-  const exportCsv = () => {
-    const url = getAuditLogsExportUrl({
-      format: "csv",
-      severity: severity === ALL ? undefined : (severity as AuditSeverity),
-      category: category === ALL ? undefined : (category as AuditCategory),
-    });
-    window.open(url, "_blank");
-  };
+  const exportMutation = useExportAuditLogs();
 
-  const exportJson = () => {
-    const url = getAuditLogsExportUrl({
-      format: "json",
+  const exportLogs = (format: "csv" | "json") =>
+    exportMutation.mutate({
+      format,
       severity: severity === ALL ? undefined : (severity as AuditSeverity),
       category: category === ALL ? undefined : (category as AuditCategory),
     });
-    window.open(url, "_blank");
-  };
+
+  // The export endpoint only understands severity and category.
+  const hasUnexportableFilters =
+    status !== ALL || !!eventType || !!userIdInput || !!orgIdInput;
 
   const hasFilters =
-    severity !== ALL ||
-    category !== ALL ||
-    status !== ALL ||
-    !!eventType ||
-    !!userIdInput ||
-    !!orgIdInput;
+    severity !== ALL || category !== ALL || hasUnexportableFilters;
 
   const columns: Column<AuditLogEntry>[] = [
     {
@@ -346,15 +344,42 @@ function AuditLogsTab() {
 
             <div className="flex-1" />
 
-            <Button variant="outline" size="sm" onClick={exportCsv}>
-              <Download className="w-3.5 h-3.5 mr-1.5" />
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => exportLogs("csv")}
+              disabled={exportMutation.isPending}
+            >
+              {exportMutation.isPending &&
+              exportMutation.variables?.format === "csv" ? (
+                <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+              ) : (
+                <Download className="w-3.5 h-3.5 mr-1.5" />
+              )}
               CSV
             </Button>
-            <Button variant="outline" size="sm" onClick={exportJson}>
-              <Download className="w-3.5 h-3.5 mr-1.5" />
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => exportLogs("json")}
+              disabled={exportMutation.isPending}
+            >
+              {exportMutation.isPending &&
+              exportMutation.variables?.format === "json" ? (
+                <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+              ) : (
+                <Download className="w-3.5 h-3.5 mr-1.5" />
+              )}
               JSON
             </Button>
           </div>
+          {hasUnexportableFilters && (
+            <p className="text-xs text-muted-foreground text-right">
+              Exports apply only the severity and category filters. Status,
+              event type, user and org filters are not included (max 10,000
+              records).
+            </p>
+          )}
         </CardContent>
       </Card>
 
@@ -364,6 +389,8 @@ function AuditLogsTab() {
             columns={columns}
             rows={data?.data}
             loading={isLoading}
+            error={error}
+            onRetry={refetch}
             rowKey={(l) => l._id}
           />
           <PaginationBar
@@ -379,7 +406,7 @@ function AuditLogsTab() {
 }
 
 function AlertsTab() {
-  const { data, isLoading } = useSecurityAlerts(50);
+  const { data, isLoading, error, refetch } = useSecurityAlerts(50);
   return (
     <Card>
       <CardHeader className="pb-3">
@@ -393,6 +420,8 @@ function AlertsTab() {
       <CardContent className="p-0">
         <DataTable
           loading={isLoading}
+          error={error}
+          onRetry={refetch}
           rows={data}
           rowKey={(l) => l._id}
           columns={[
@@ -455,7 +484,11 @@ function AlertsTab() {
 }
 
 function FailedLoginsTab() {
-  const { data, isLoading } = useFailedLogins(100);
+  const { data, isLoading, error, refetch } = useFailedLogins(100);
+
+  if (error && !data) {
+    return <ErrorCard error={error} onRetry={refetch} />;
+  }
 
   return (
     <div className="space-y-4">
@@ -535,6 +568,8 @@ function FailedLoginsTab() {
         <CardContent className="p-0">
           <DataTable
             loading={isLoading}
+            error={error}
+            onRetry={refetch}
             rows={data?.data}
             rowKey={(r) => r._id}
             columns={[
@@ -585,7 +620,11 @@ function FailedLoginsTab() {
 }
 
 function AnomaliesTab() {
-  const { data, isLoading } = useSecurityAnomalies();
+  const { data, isLoading, error, refetch } = useSecurityAnomalies();
+
+  if (error && !data) {
+    return <ErrorCard error={error} onRetry={refetch} />;
+  }
 
   return (
     <div className="space-y-4">
@@ -602,6 +641,8 @@ function AnomaliesTab() {
         <CardContent className="p-0">
           <DataTable
             loading={isLoading}
+            error={error}
+            onRetry={refetch}
             rows={data?.bruteForceAttempts}
             rowKey={(r) => r.ipAddress}
             columns={[
@@ -661,6 +702,8 @@ function AnomaliesTab() {
         <CardContent className="p-0">
           <DataTable
             loading={isLoading}
+            error={error}
+            onRetry={refetch}
             rows={data?.unusualDownloadVolumes}
             rowKey={(r) => `${r.userId}-${r.date}`}
             columns={[
@@ -724,6 +767,8 @@ function AnomaliesTab() {
         <CardContent className="p-0">
           <DataTable
             loading={isLoading}
+            error={error}
+            onRetry={refetch}
             rows={data?.currentlyLockedAccounts}
             rowKey={(r) => r._id}
             columns={[
@@ -781,7 +826,11 @@ function AnomaliesTab() {
 }
 
 function SessionsTab() {
-  const { data, isLoading } = useActiveSessionsStats();
+  const { data, isLoading, error, refetch } = useActiveSessionsStats();
+
+  if (error && !data) {
+    return <ErrorCard error={error} onRetry={refetch} />;
+  }
 
   return (
     <div className="space-y-4">
@@ -854,7 +903,11 @@ function SessionsTab() {
 }
 
 function TwoFaTab() {
-  const { data, isLoading } = useTwoFaStats();
+  const { data, isLoading, error, refetch } = useTwoFaStats();
+
+  if (error && !data) {
+    return <ErrorCard error={error} onRetry={refetch} />;
+  }
 
   return (
     <div className="space-y-4">

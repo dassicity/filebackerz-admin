@@ -115,8 +115,12 @@ export interface SystemHealthResponse {
 export async function getSystemHealth(): Promise<SystemHealthResponse> {
   const { data } = await apiClient.get<SystemHealthResponse>(
     "/admin/system/health",
-    // 503 is a valid signal for "degraded" — don't throw on it
-    { validateStatus: (status) => status < 600 },
+    // 503 is a valid signal for "degraded" — don't throw on it. Anything else
+    // outside 2xx is a real failure (and a 401 must reach the interceptor).
+    {
+      validateStatus: (status) =>
+        (status >= 200 && status < 300) || status === 503,
+    },
   );
   return data;
 }

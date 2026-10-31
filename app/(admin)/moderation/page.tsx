@@ -106,7 +106,7 @@ function ShareLinksTab() {
       resourceType === ALL ? undefined : (resourceType as "file" | "folder"),
   };
 
-  const { data, isLoading, isFetching } = useShareLinks(params);
+  const { data, isLoading, error, refetch, isFetching } = useShareLinks(params);
 
   const columns: Column<AdminShareLink>[] = [
     {
@@ -236,6 +236,8 @@ function ShareLinksTab() {
               columns={columns}
               rows={data?.data}
               loading={isLoading}
+              error={error}
+              onRetry={refetch}
               rowKey={(l) => l._id}
               onRowClick={(l) => setDetailId(l._id)}
               emptyState={
@@ -278,7 +280,13 @@ function FileRequestsTab() {
     isActive: isActive === ALL ? undefined : (isActive as "true" | "false"),
   };
 
-  const { data, isLoading, isFetching } = useFileRequests(params);
+  const {
+    data,
+    isLoading,
+    error,
+    refetch,
+    isFetching,
+  } = useFileRequests(params);
   const deactivate = useDeactivateFileRequest();
 
   const columns: Column<AdminFileRequest>[] = [
@@ -401,6 +409,8 @@ function FileRequestsTab() {
               columns={columns}
               rows={data?.data}
               loading={isLoading}
+              error={error}
+              onRetry={refetch}
               rowKey={(r) => r._id}
               emptyState={
                 <div className="py-12 text-center">
@@ -473,7 +483,13 @@ function AnonymousUploadsTab() {
         : (status as "pending" | "approved" | "rejected"),
   };
 
-  const { data, isLoading, isFetching } = useAnonymousUploads(params);
+  const {
+    data,
+    isLoading,
+    error,
+    refetch,
+    isFetching,
+  } = useAnonymousUploads(params);
 
   const columns: Column<AdminAnonymousUpload>[] = [
     {
@@ -585,6 +601,8 @@ function AnonymousUploadsTab() {
             columns={columns}
             rows={data?.data}
             loading={isLoading}
+            error={error}
+            onRetry={refetch}
             rowKey={(u) => u._id}
             emptyState={
               <div className="py-12 text-center">

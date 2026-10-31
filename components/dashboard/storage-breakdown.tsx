@@ -17,6 +17,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ErrorCard } from "@/components/common/error-state";
 import { useStorageBreakdown } from "@/lib/hooks/use-dashboard";
 import { formatBytes, formatNumber } from "@/lib/formatters";
 
@@ -42,7 +43,7 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 export function StorageBreakdown() {
-  const { data, isLoading } = useStorageBreakdown(5);
+  const { data, isLoading, error, refetch } = useStorageBreakdown(5);
 
   const providerData = Object.entries(
     data?.byosConnections.byProvider ?? {},
@@ -50,6 +51,16 @@ export function StorageBreakdown() {
     name: PROVIDER_LABELS[key] ?? key,
     value,
   }));
+
+  if (error && !data) {
+    return (
+      <ErrorCard
+        error={error}
+        onRetry={refetch}
+        title="Couldn't load storage breakdown"
+      />
+    );
+  }
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">

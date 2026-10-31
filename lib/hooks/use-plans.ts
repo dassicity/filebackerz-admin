@@ -8,6 +8,7 @@ import {
   getBillingOverage,
   type UpdatePlanDefaultsBody,
 } from "@/lib/api/plans";
+import { getApiErrorMessage } from "@/lib/api/errors";
 
 export function usePlanDistribution() {
   return useQuery({
@@ -32,15 +33,8 @@ export function useUpdatePlanDefaults() {
       toast.success("Plan defaults updated");
       qc.invalidateQueries({ queryKey: ["admin", "plans"] });
     },
-    onError: (err) => {
-      const message =
-        (err as { response?: { data?: { message?: string; error?: string } } })
-          ?.response?.data?.message ??
-        (err as { response?: { data?: { error?: string } } })?.response?.data
-          ?.error ??
-        "Failed to update plan defaults";
-      toast.error(message);
-    },
+    onError: (err) =>
+      toast.error(getApiErrorMessage(err, "Failed to update plan defaults")),
   });
 }
 

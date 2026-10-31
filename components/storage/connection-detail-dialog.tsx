@@ -12,6 +12,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { StatusBadge } from "@/components/common/status-badges";
+import { ErrorState } from "@/components/common/error-state";
 import {
   useStorageConnection,
   useTriggerHealthCheck,
@@ -25,7 +26,12 @@ interface Props {
 
 export function ConnectionDetailDialog({ connectionId, onClose }: Props) {
   const open = !!connectionId;
-  const { data, isLoading } = useStorageConnection(connectionId ?? undefined);
+  const {
+    data,
+    isLoading,
+    error,
+    refetch,
+  } = useStorageConnection(connectionId ?? undefined);
   const trigger = useTriggerHealthCheck();
 
   return (
@@ -50,7 +56,9 @@ export function ConnectionDetailDialog({ connectionId, onClose }: Props) {
           </DialogDescription>
         </DialogHeader>
 
-        {isLoading || !data ? (
+        {error && !data ? (
+          <ErrorState error={error} onRetry={refetch} />
+        ) : isLoading || !data ? (
           <div className="flex items-center justify-center py-10">
             <Loader2 className="w-5 h-5 animate-spin text-primary" />
           </div>

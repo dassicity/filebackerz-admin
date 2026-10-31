@@ -53,7 +53,13 @@ export default function OrganizationsPage() {
     sortOrder: "desc",
   };
 
-  const { data, isLoading, isFetching } = useOrganizationsList(params);
+  const {
+    data,
+    isLoading,
+    error,
+    refetch,
+    isFetching,
+  } = useOrganizationsList(params);
 
   const apply = (e: React.FormEvent) => {
     e.preventDefault();
@@ -248,6 +254,8 @@ export default function OrganizationsPage() {
             columns={columns}
             rows={data?.data}
             loading={isLoading}
+            error={error}
+            onRetry={refetch}
             rowKey={(o) => o._id}
             emptyState={
               <div className="flex flex-col items-center justify-center py-16 text-center">

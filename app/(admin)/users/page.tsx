@@ -50,7 +50,7 @@ export default function UsersPage() {
       authProvider === ALL ? undefined : (authProvider as AuthProvider),
   };
 
-  const { data, isLoading, isFetching } = useUsersList(params);
+  const { data, isLoading, error, refetch, isFetching } = useUsersList(params);
 
   const applySearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -254,6 +254,8 @@ export default function UsersPage() {
             columns={columns}
             rows={data?.data}
             loading={isLoading}
+            error={error}
+            onRetry={refetch}
             rowKey={(u) => u._id}
             emptyState={
               <div className="flex flex-col items-center justify-center py-16 text-center">

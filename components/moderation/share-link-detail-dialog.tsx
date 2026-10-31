@@ -23,6 +23,7 @@ import {
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { StatusBadge } from "@/components/common/status-badges";
+import { ErrorState } from "@/components/common/error-state";
 import { useShareLink, useRevokeShareLink } from "@/lib/hooks/use-content";
 import { formatRelative } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
@@ -34,7 +35,7 @@ interface Props {
 
 export function ShareLinkDetailDialog({ linkId, onClose }: Props) {
   const open = !!linkId;
-  const { data, isLoading } = useShareLink(linkId ?? undefined);
+  const { data, isLoading, error, refetch } = useShareLink(linkId ?? undefined);
   const revoke = useRevokeShareLink();
 
   const doRevoke = () => {
@@ -52,7 +53,9 @@ export function ShareLinkDetailDialog({ linkId, onClose }: Props) {
           </DialogDescription>
         </DialogHeader>
 
-        {isLoading || !data ? (
+        {error && !data ? (
+          <ErrorState error={error} onRetry={refetch} />
+        ) : isLoading || !data ? (
           <div className="flex items-center justify-center py-10">
             <Loader2 className="w-5 h-5 animate-spin text-primary" />
           </div>

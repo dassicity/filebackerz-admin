@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ErrorState } from "@/components/common/error-state";
 import { useGrowth } from "@/lib/hooks/use-dashboard";
 import type { Granularity, GrowthData } from "@/lib/api/dashboard";
 
@@ -66,7 +67,7 @@ const PERIODS_FOR: Record<Granularity, number> = {
 
 export function GrowthChart() {
   const [granularity, setGranularity] = useState<Granularity>("week");
-  const { data, isLoading } = useGrowth({
+  const { data, isLoading, error, refetch } = useGrowth({
     granularity,
     periods: PERIODS_FOR[granularity],
   });
@@ -103,6 +104,8 @@ export function GrowthChart() {
       <CardContent>
         {isLoading ? (
           <Skeleton className="h-[320px] w-full" />
+        ) : error && !data ? (
+          <ErrorState error={error} onRetry={refetch} />
         ) : isEmpty ? (
           <div className="flex flex-col items-center justify-center py-16 text-center">
             <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center mb-4">

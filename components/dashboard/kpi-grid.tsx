@@ -9,13 +9,24 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { KpiCard } from "./kpi-card";
+import { ErrorCard } from "@/components/common/error-state";
 import { useOverview } from "@/lib/hooks/use-dashboard";
 import { formatBytes, formatNumber, formatPercent } from "@/lib/formatters";
 
 export function KpiGrid() {
-  const { data, isLoading } = useOverview();
+  const { data, isLoading, error, refetch } = useOverview();
 
   const paidOrgs = data?.organizations.byPlan.paid ?? 0;
+
+  if (error && !data) {
+    return (
+      <ErrorCard
+        error={error}
+        onRetry={refetch}
+        title="Couldn't load platform KPIs"
+      />
+    );
+  }
 
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">

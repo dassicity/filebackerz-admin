@@ -31,7 +31,7 @@ export function CouponsTab() {
   const [createOpen, setCreateOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  const { data, isLoading } = useCoupons({
+  const { data, isLoading, error, refetch } = useCoupons({
     active: active === ALL ? undefined : (active as "true" | "false"),
   });
 
@@ -160,6 +160,8 @@ export function CouponsTab() {
             columns={columns}
             rows={data}
             loading={isLoading}
+            error={error}
+            onRetry={refetch}
             rowKey={(c) => c._id}
             onRowClick={(c) => setSelectedId(c._id)}
             emptyState={

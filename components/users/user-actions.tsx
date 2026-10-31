@@ -58,6 +58,7 @@ import type {
   UserRole,
   UserStatus,
 } from "@/lib/api/users";
+import { useAuthStore } from "@/lib/store/auth-store";
 import { cn } from "@/lib/utils";
 
 interface UserActionsProps {
@@ -81,6 +82,20 @@ export function UserActions({ user }: UserActionsProps) {
   const [openDialog, setOpenDialog] = useState<DialogKind>(null);
   const [roleValue, setRoleValue] = useState<UserRole>(user.role as UserRole);
 
+  const currentUser = useAuthStore((s) => s.user);
+  const isSelf = currentUser?.id === user._id;
+  const actorIsSuperadmin = currentUser?.role === "superadmin";
+  // Status, role, 2FA and session actions control whether someone can get
+  // in. Nobody gets them on their own account (one click locks you out), and
+  // a plain admin doesn't get them on a superadmin.
+  const canManageAccess =
+    !!currentUser &&
+    !isSelf &&
+    (actorIsSuperadmin || user.role !== "superadmin");
+  const accessNote = isSelf
+    ? "You can't change access on your own account."
+    : "Only a superadmin can change another superadmin's access.";
+
   const updateStatus = useUpdateUserStatus();
   const updateRole = useUpdateUserRole();
   const resetPw = useForceResetPassword();
@@ -90,13 +105,16 @@ export function UserActions({ user }: UserActionsProps) {
 
   const close = () => setOpenDialog(null);
 
-  const doStatus = (status: UserStatus) =>
+  const doStatus = (status: UserStatus) => {
+    if (!canManageAccess) return;
     updateStatus.mutate(
       { userId: user._id, args: [status] },
       { onSuccess: close },
     );
+  };
 
   const doRole = () => {
+    if (!canManageAccess) return;
     if (roleValue === user.role) {
       close();
       return;
@@ -111,12 +129,20 @@ export function UserActions({ user }: UserActionsProps) {
     resetPw.mutate({ userId: user._id, args: [] }, { onSuccess: close });
   const doVerify = () =>
     verifyEmail.mutate({ userId: user._id, args: [] }, { onSuccess: close });
-  const doDisable2fa = () =>
+  const doDisable2fa = () => {
+    if (!canManageAccess) return;
     disable2fa.mutate({ userId: user._id, args: [] }, { onSuccess: close });
-  const doRevoke = () =>
+  };
+  const doRevoke = () => {
+    if (!canManageAccess) return;
     revokeSessions.mutate({ userId: user._id, args: [] }, { onSuccess: close });
+  };
 
   const isLocal = user.authProvider === "local";
+  const hasAccountItems =
+    !user.isEmailVerified ||
+    isLocal ||
+    (canManageAccess && !!user.twoFactorAuth?.enabled);
 
   return (
     <>
@@ -133,29 +159,37 @@ export function UserActions({ user }: UserActionsProps) {
           </DropdownMenuLabel>
           <DropdownMenuSeparator />
 
-          {user.status === "active" ? (
-            <DropdownMenuItem onClick={() => setOpenDialog("suspend")}>
-              <UserX className="w-4 h-4 mr-2" />
-              Deactivate
-            </DropdownMenuItem>
+          {canManageAccess ? (
+            <>
+              {user.status === "active" ? (
+                <DropdownMenuItem onClick={() => setOpenDialog("suspend")}>
+                  <UserX className="w-4 h-4 mr-2" />
+                  Deactivate
+                </DropdownMenuItem>
+              ) : (
+                <DropdownMenuItem onClick={() => setOpenDialog("activate")}>
+                  <UserCheck className="w-4 h-4 mr-2" />
+                  Activate
+                </DropdownMenuItem>
+              )}
+
+              <DropdownMenuItem
+                onClick={() => {
+                  setRoleValue(user.role as UserRole);
+                  setOpenDialog("change-role");
+                }}
+              >
+                <UserCheck className="w-4 h-4 mr-2" />
+                Change role
+              </DropdownMenuItem>
+            </>
           ) : (
-            <DropdownMenuItem onClick={() => setOpenDialog("activate")}>
-              <UserCheck className="w-4 h-4 mr-2" />
-              Activate
-            </DropdownMenuItem>
+            <DropdownMenuLabel className="max-w-[220px] text-xs text-muted-foreground font-normal">
+              {accessNote}
+            </DropdownMenuLabel>
           )}
 
-          <DropdownMenuItem
-            onClick={() => {
-              setRoleValue(user.role as UserRole);
-              setOpenDialog("change-role");
-            }}
-          >
-            <UserCheck className="w-4 h-4 mr-2" />
-            Change role
-          </DropdownMenuItem>
-
-          <DropdownMenuSeparator />
+          {hasAccountItems && <DropdownMenuSeparator />}
 
           {!user.isEmailVerified && (
             <DropdownMenuItem onClick={() => setOpenDialog("verify-email")}>
@@ -171,22 +205,26 @@ export function UserActions({ user }: UserActionsProps) {
             </DropdownMenuItem>
           )}
 
-          {user.twoFactorAuth?.enabled && (
+          {canManageAccess && user.twoFactorAuth?.enabled && (
             <DropdownMenuItem onClick={() => setOpenDialog("disable-2fa")}>
               <ShieldOff className="w-4 h-4 mr-2" />
               Disable 2FA
             </DropdownMenuItem>
           )}
 
-          <DropdownMenuSeparator />
+          {canManageAccess && (
+            <>
+              <DropdownMenuSeparator />
 
-          <DropdownMenuItem
-            onClick={() => setOpenDialog("revoke-sessions")}
-            className="text-destructive focus:text-destructive"
-          >
-            <LogOut className="w-4 h-4 mr-2" />
-            Revoke all sessions
-          </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => setOpenDialog("revoke-sessions")}
+                className="text-destructive focus:text-destructive"
+              >
+                <LogOut className="w-4 h-4 mr-2" />
+                Revoke all sessions
+              </DropdownMenuItem>
+            </>
+          )}
         </DropdownMenuContent>
       </DropdownMenu>
 
@@ -253,12 +291,16 @@ export function UserActions({ user }: UserActionsProps) {
               <SelectContent>
                 <SelectItem value="user">User</SelectItem>
                 <SelectItem value="admin">Admin</SelectItem>
-                <SelectItem value="superadmin">Superadmin</SelectItem>
+                {actorIsSuperadmin && (
+                  <SelectItem value="superadmin">Superadmin</SelectItem>
+                )}
               </SelectContent>
             </Select>
-            <p className="text-xs text-muted-foreground">
-              Only superadmins can promote to superadmin. You cannot change your own role.
-            </p>
+            {!actorIsSuperadmin && (
+              <p className="text-xs text-muted-foreground">
+                Only superadmins can promote to superadmin.
+              </p>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={close}>

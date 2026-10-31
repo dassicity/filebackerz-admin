@@ -16,6 +16,7 @@ import {
   Gauge,
 } from "lucide-react";
 import { PageHeader } from "@/components/common/page-header";
+import { ErrorCard } from "@/components/common/error-state";
 import { DataTable, type Column } from "@/components/common/data-table";
 import { PlanBadge, StatusBadge } from "@/components/common/status-badges";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -27,6 +28,17 @@ import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { FieldError } from "@/components/common/field-error";
+import {
   usePlanDistribution,
   usePlanDefaults,
   useUpdatePlanDefaults,
@@ -35,10 +47,15 @@ import {
 } from "@/lib/hooks/use-plans";
 import type {
   OverageOrganization,
+  PlanDefaults,
   PlanTierDefaults,
   PlanTierKey,
   UpdatePlanDefaultsBody,
 } from "@/lib/api/plans";
+import {
+  parseNumberField,
+  type NumberFieldRule,
+} from "@/lib/validations/number-field";
 import {
   formatBytes,
   formatCents,
@@ -102,7 +119,11 @@ export default function PlansPage() {
 }
 
 function DistributionTab() {
-  const { data, isLoading } = usePlanDistribution();
+  const { data, isLoading, error, refetch } = usePlanDistribution();
+
+  if (error && !data) {
+    return <ErrorCard error={error} onRetry={refetch} />;
+  }
 
   return (
     <div className="space-y-4">
@@ -311,32 +332,131 @@ function toForm(t: PlanTierDefaults): TierForm {
   };
 }
 
-function fromForm(f: TierForm, tier: PlanTierKey): PlanTierDefaults {
-  const next: PlanTierDefaults = {
-    storageQuota: Math.round(Number(f.storageQuotaGB || 0) * GB),
-    maxConnections: Number(f.maxConnections || 0),
-    maxFileVersions: Number(f.maxFileVersions || 0),
-  };
+type TierErrors = Partial<Record<keyof TierForm, string>>;
+
+const NO_ERRORS: Record<PlanTierKey, TierErrors> = { trial: {}, paid: {} };
+
+const FORM_FIELDS: {
+  field: keyof TierForm;
+  apiKey: keyof PlanTierDefaults;
+  rule: NumberFieldRule;
+  toApi: (n: number) => number;
   // Overage and seat-cap fields are rejected on trial — only send for paid.
-  if (tier === "paid") {
-    next.softSeatCap = Number(f.softSeatCap || 0);
-    next.overageBlockBytes = Math.round(Number(f.overageBlockGB || 0) * GB);
-    next.overagePriceCents = Math.round(
-      Number(f.overagePriceDollars || 0) * 100,
-    );
-    next.overageCapBlocks = Number(f.overageCapBlocks || 0);
+  paidOnly?: boolean;
+}[] = [
+  {
+    field: "storageQuotaGB",
+    apiKey: "storageQuota",
+    rule: { label: "Included storage", greaterThan: 0 },
+    toApi: (n) => Math.round(n * GB),
+  },
+  {
+    field: "maxConnections",
+    apiKey: "maxConnections",
+    rule: { label: "Max BYOS connections", min: 0, integer: true },
+    toApi: (n) => n,
+  },
+  {
+    field: "maxFileVersions",
+    apiKey: "maxFileVersions",
+    rule: { label: "Max file versions", min: 0, integer: true },
+    toApi: (n) => n,
+  },
+  {
+    field: "softSeatCap",
+    apiKey: "softSeatCap",
+    rule: { label: "Soft seat cap", min: 1, integer: true },
+    toApi: (n) => n,
+    paidOnly: true,
+  },
+  {
+    field: "overageBlockGB",
+    apiKey: "overageBlockBytes",
+    rule: { label: "Overage block size", greaterThan: 0 },
+    toApi: (n) => Math.round(n * GB),
+    paidOnly: true,
+  },
+  {
+    field: "overagePriceDollars",
+    apiKey: "overagePriceCents",
+    rule: { label: "Price per block", min: 0, maxDecimals: 2 },
+    toApi: (n) => Math.round(n * 100),
+    paidOnly: true,
+  },
+  {
+    field: "overageCapBlocks",
+    apiKey: "overageCapBlocks",
+    rule: { label: "Overage cap", min: 0, integer: true },
+    toApi: (n) => n,
+    paidOnly: true,
+  },
+];
+
+// Pricing knobs that change what customers are billed; saving any of these
+// asks for confirmation first.
+const PRICING_FIELDS: {
+  apiKey: keyof PlanTierDefaults;
+  label: string;
+  format: (v: number) => string;
+}[] = [
+  {
+    apiKey: "overagePriceCents",
+    label: "Price per block",
+    format: (v) => formatCents(v),
+  },
+  {
+    apiKey: "overageBlockBytes",
+    label: "Overage block size",
+    format: (v) => formatBytes(v),
+  },
+  {
+    apiKey: "overageCapBlocks",
+    label: "Overage cap",
+    format: (v) => `${formatNumber(v)} blocks`,
+  },
+];
+
+// Builds the PUT body from the edited forms. Fields whose text still matches
+// what the server value renders as are skipped, so display rounding (GB to 2
+// decimals) or a field the server didn't return never gets written back.
+function buildDefaultsUpdate(
+  data: PlanDefaults,
+  forms: Record<PlanTierKey, TierForm>,
+): { body: UpdatePlanDefaultsBody; errors: Record<PlanTierKey, TierErrors> } {
+  const body: UpdatePlanDefaultsBody = {};
+  const errors: Record<PlanTierKey, TierErrors> = { trial: {}, paid: {} };
+
+  for (const tier of TIERS) {
+    const baseline = toForm(data[tier]);
+    const patch: Partial<PlanTierDefaults> = {};
+    for (const { field, apiKey, rule, toApi, paidOnly } of FORM_FIELDS) {
+      if (paidOnly && tier !== "paid") continue;
+      const raw = forms[tier][field];
+      if (raw.trim() === baseline[field]) continue;
+      const parsed = parseNumberField(raw, rule);
+      if (parsed.error !== undefined) {
+        errors[tier][field] = parsed.error;
+        continue;
+      }
+      const value = toApi(parsed.value);
+      if (value !== data[tier][apiKey]) patch[apiKey] = value;
+    }
+    if (Object.keys(patch).length > 0) body[tier] = patch;
   }
-  return next;
+  return { body, errors };
 }
 
 function DefaultsTab() {
-  const { data, isLoading } = usePlanDefaults();
+  const { data, isLoading, error, refetch } = usePlanDefaults();
   const mutation = useUpdatePlanDefaults();
 
   const [forms, setForms] = useState<Record<PlanTierKey, TierForm>>({
     trial: EMPTY_TIER_FORM,
     paid: EMPTY_TIER_FORM,
   });
+  const [errors, setErrors] = useState(NO_ERRORS);
+  const [pendingPricingBody, setPendingPricingBody] =
+    useState<UpdatePlanDefaultsBody | null>(null);
 
   useEffect(() => {
     if (data) {
@@ -344,43 +464,43 @@ function DefaultsTab() {
         trial: toForm(data.trial),
         paid: toForm(data.paid),
       });
+      setErrors(NO_ERRORS);
     }
   }, [data]);
 
   const update = (tier: PlanTierKey, field: keyof TierForm, value: string) => {
     setForms((prev) => ({ ...prev, [tier]: { ...prev[tier], [field]: value } }));
+    setErrors((prev) => ({
+      ...prev,
+      [tier]: { ...prev[tier], [field]: undefined },
+    }));
   };
 
   const save = () => {
     if (!data) return;
-    const body: UpdatePlanDefaultsBody = {};
-    for (const tier of TIERS) {
-      const next = fromForm(forms[tier], tier);
-      const prev = data[tier];
-      const patch: Partial<PlanTierDefaults> = {};
-      if (next.storageQuota !== prev.storageQuota)
-        patch.storageQuota = next.storageQuota;
-      if (next.maxConnections !== prev.maxConnections)
-        patch.maxConnections = next.maxConnections;
-      if (next.maxFileVersions !== prev.maxFileVersions)
-        patch.maxFileVersions = next.maxFileVersions;
-      if (tier === "paid") {
-        if (next.softSeatCap !== prev.softSeatCap)
-          patch.softSeatCap = next.softSeatCap;
-        if (next.overageBlockBytes !== prev.overageBlockBytes)
-          patch.overageBlockBytes = next.overageBlockBytes;
-        if (next.overagePriceCents !== prev.overagePriceCents)
-          patch.overagePriceCents = next.overagePriceCents;
-        if (next.overageCapBlocks !== prev.overageCapBlocks)
-          patch.overageCapBlocks = next.overageCapBlocks;
-      }
-      if (Object.keys(patch).length > 0) body[tier] = patch;
+    const { body, errors: nextErrors } = buildDefaultsUpdate(data, forms);
+    setErrors(nextErrors);
+    if (TIERS.some((t) => Object.keys(nextErrors[t]).length > 0)) {
+      toast.error("Fix the highlighted fields before saving.");
+      return;
     }
     if (Object.keys(body).length === 0) {
       toast.info("No changes to save.");
       return;
     }
+    const changesPricing = PRICING_FIELDS.some(
+      ({ apiKey }) => body.paid?.[apiKey] !== undefined,
+    );
+    if (changesPricing) {
+      setPendingPricingBody(body);
+      return;
+    }
     mutation.mutate(body);
+  };
+
+  const confirmPricingSave = () => {
+    if (pendingPricingBody) mutation.mutate(pendingPricingBody);
+    setPendingPricingBody(null);
   };
 
   const reset = () => {
@@ -389,7 +509,12 @@ function DefaultsTab() {
       trial: toForm(data.trial),
       paid: toForm(data.paid),
     });
+    setErrors(NO_ERRORS);
   };
+
+  if (error && !data) {
+    return <ErrorCard error={error} onRetry={refetch} />;
+  }
 
   if (isLoading || !data) {
     return (
@@ -422,6 +547,7 @@ function DefaultsTab() {
             key={tier}
             tier={tier}
             form={forms[tier]}
+            errors={errors[tier]}
             onChange={(field, value) => update(tier, field, value)}
           />
         ))}
@@ -436,6 +562,42 @@ function DefaultsTab() {
           {mutation.isPending ? "Saving…" : "Save all changes"}
         </Button>
       </div>
+
+      <AlertDialog
+        open={pendingPricingBody !== null}
+        onOpenChange={(open) => !open && setPendingPricingBody(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Change overage pricing?</AlertDialogTitle>
+            <AlertDialogDescription>
+              These changes apply to every paid organization from its next
+              invoice.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <ul className="space-y-1.5 text-sm">
+            {PRICING_FIELDS.map(({ apiKey, label, format }) => {
+              const next = pendingPricingBody?.paid?.[apiKey];
+              if (next === undefined) return null;
+              const prev = data.paid[apiKey];
+              return (
+                <li key={apiKey} className="flex justify-between gap-4">
+                  <span className="text-muted-foreground">{label}</span>
+                  <span className="font-mono">
+                    {prev != null ? format(prev) : "not set"} → {format(next)}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmPricingSave}>
+              Save pricing
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
@@ -443,12 +605,19 @@ function DefaultsTab() {
 function TierCard({
   tier,
   form,
+  errors,
   onChange,
 }: {
   tier: PlanTierKey;
   form: TierForm;
+  errors: TierErrors;
   onChange: (field: keyof TierForm, value: string) => void;
 }) {
+  const invalid = (field: keyof TierForm) =>
+    errors[field]
+      ? "border-destructive focus-visible:ring-destructive"
+      : undefined;
+
   const gb = Number(form.storageQuotaGB);
   const blockGB = Number(form.overageBlockGB);
   const priceDollars = Number(form.overagePriceDollars);
@@ -481,6 +650,8 @@ function TierCard({
             type="number"
             min={0}
             step={0.5}
+            className={invalid("storageQuotaGB")}
+            aria-invalid={!!errors.storageQuotaGB}
             value={form.storageQuotaGB}
             onChange={(e) => onChange("storageQuotaGB", e.target.value)}
           />
@@ -489,6 +660,7 @@ function TierCard({
               ? `= ${formatBytes(gb * GB)}`
               : "—"}
           </p>
+          <FieldError message={errors.storageQuotaGB} />
         </div>
 
         <div className="space-y-1.5">
@@ -502,9 +674,12 @@ function TierCard({
             id={`${tier}-connections`}
             type="number"
             min={0}
+            className={invalid("maxConnections")}
+            aria-invalid={!!errors.maxConnections}
             value={form.maxConnections}
             onChange={(e) => onChange("maxConnections", e.target.value)}
           />
+          <FieldError message={errors.maxConnections} />
         </div>
 
         <div className="space-y-1.5">
@@ -518,9 +693,12 @@ function TierCard({
             id={`${tier}-versions`}
             type="number"
             min={0}
+            className={invalid("maxFileVersions")}
+            aria-invalid={!!errors.maxFileVersions}
             value={form.maxFileVersions}
             onChange={(e) => onChange("maxFileVersions", e.target.value)}
           />
+          <FieldError message={errors.maxFileVersions} />
         </div>
 
         {tier === "paid" && (
@@ -536,12 +714,15 @@ function TierCard({
                 id={`${tier}-seat-cap`}
                 type="number"
                 min={0}
+                className={invalid("softSeatCap")}
+                aria-invalid={!!errors.softSeatCap}
                 value={form.softSeatCap}
                 onChange={(e) => onChange("softSeatCap", e.target.value)}
               />
               <p className="text-xs text-muted-foreground">
                 Alert threshold only — never blocks an invite.
               </p>
+              <FieldError message={errors.softSeatCap} />
             </div>
 
             <div className="pt-3 border-t border-border space-y-4">
@@ -562,6 +743,8 @@ function TierCard({
                   type="number"
                   min={0}
                   step={0.5}
+                  className={invalid("overageBlockGB")}
+                  aria-invalid={!!errors.overageBlockGB}
                   value={form.overageBlockGB}
                   onChange={(e) => onChange("overageBlockGB", e.target.value)}
                 />
@@ -570,6 +753,7 @@ function TierCard({
                     ? `= ${formatBytes(blockGB * GB)} billing unit`
                     : "—"}
                 </p>
+                <FieldError message={errors.overageBlockGB} />
               </div>
 
               <div className="space-y-1.5">
@@ -584,6 +768,8 @@ function TierCard({
                   type="number"
                   min={0}
                   step={0.01}
+                  className={invalid("overagePriceDollars")}
+                  aria-invalid={!!errors.overagePriceDollars}
                   value={form.overagePriceDollars}
                   onChange={(e) =>
                     onChange("overagePriceDollars", e.target.value)
@@ -594,6 +780,7 @@ function TierCard({
                     ? `= ${formatCents(Math.round(priceDollars * 100))} per block`
                     : "—"}
                 </p>
+                <FieldError message={errors.overagePriceDollars} />
               </div>
 
               <div className="space-y-1.5">
@@ -607,6 +794,8 @@ function TierCard({
                   id={`${tier}-overage-cap`}
                   type="number"
                   min={0}
+                  className={invalid("overageCapBlocks")}
+                  aria-invalid={!!errors.overageCapBlocks}
                   value={form.overageCapBlocks}
                   onChange={(e) => onChange("overageCapBlocks", e.target.value)}
                 />
@@ -615,6 +804,7 @@ function TierCard({
                     ? `Max overage bill: ${formatCents(maxBillCents)} per period`
                     : "—"}
                 </p>
+                <FieldError message={errors.overageCapBlocks} />
               </div>
             </div>
           </>
@@ -625,7 +815,11 @@ function TierCard({
 }
 
 function BillingTab() {
-  const { data, isLoading } = useBillingOverview();
+  const { data, isLoading, error, refetch } = useBillingOverview();
+
+  if (error && !data) {
+    return <ErrorCard error={error} onRetry={refetch} />;
+  }
 
   return (
     <div className="space-y-4">
@@ -807,7 +1001,7 @@ function BillingTab() {
 }
 
 function OverageTab() {
-  const { data, isLoading } = useBillingOverage();
+  const { data, isLoading, error, refetch } = useBillingOverage();
 
   const columns: Column<OverageOrganization>[] = [
     {
@@ -923,6 +1117,10 @@ function OverageTab() {
     },
   ];
 
+  if (error && !data) {
+    return <ErrorCard error={error} onRetry={refetch} />;
+  }
+
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -997,6 +1195,8 @@ function OverageTab() {
             columns={columns}
             rows={data?.organizations}
             loading={isLoading}
+            error={error}
+            onRetry={refetch}
             rowKey={(o) => o.organizationId}
             emptyState={
               <div className="py-12 text-center">

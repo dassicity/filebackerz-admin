@@ -23,6 +23,8 @@ import {
   FileText,
 } from "lucide-react";
 import { PageHeader } from "@/components/common/page-header";
+import { ErrorCard } from "@/components/common/error-state";
+import { isNotFoundError } from "@/lib/api/errors";
 import { DataTable, type Column } from "@/components/common/data-table";
 import { PaginationBar } from "@/components/common/pagination-bar";
 import {
@@ -62,12 +64,25 @@ export default function OrganizationDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = use(params);
-  const { data: org, isLoading, error } = useOrganization(id);
+  const { data: org, isLoading, error, refetch } = useOrganization(id);
 
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-24">
         <Loader2 className="w-6 h-6 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  if (error && !org && !isNotFoundError(error)) {
+    return (
+      <div>
+        <PageHeader title="Organization" />
+        <ErrorCard
+          error={error}
+          onRetry={refetch}
+          title="Couldn't load this organization"
+        />
       </div>
     );
   }
@@ -244,7 +259,7 @@ function StatCard({
 
 function MembersTab({ orgId }: { orgId: string }) {
   const [page, setPage] = useState(1);
-  const { data, isLoading, isFetching } = useOrgMembers(orgId, {
+  const { data, isLoading, error, refetch, isFetching } = useOrgMembers(orgId, {
     page,
     limit: 20,
   });
@@ -310,6 +325,8 @@ function MembersTab({ orgId }: { orgId: string }) {
           columns={columns}
           rows={data?.data}
           loading={isLoading}
+          error={error}
+          onRetry={refetch}
           rowKey={(m) => m._id}
           emptyState={
             <div className="py-12 text-center">
@@ -341,7 +358,7 @@ function StorageTab({ orgId }: { orgId: string }) {
 }
 
 function StorageDetailsSection({ orgId }: { orgId: string }) {
-  const { data, isLoading } = useOrgStorage(orgId);
+  const { data, isLoading, error, refetch } = useOrgStorage(orgId);
 
   if (isLoading) {
     return (
@@ -351,6 +368,10 @@ function StorageDetailsSection({ orgId }: { orgId: string }) {
         </CardContent>
       </Card>
     );
+  }
+
+  if (error && !data) {
+    return <ErrorCard error={error} onRetry={refetch} />;
   }
 
   if (!data) {
@@ -467,7 +488,12 @@ const HISTORY_RANGES = [
 
 function StorageHistoryCard({ orgId }: { orgId: string }) {
   const [days, setDays] = useState("90");
-  const { data, isLoading } = useOrgStorageHistory(orgId, Number(days));
+  const {
+    data,
+    isLoading,
+    error,
+    refetch,
+  } = useOrgStorageHistory(orgId, Number(days));
 
   const points = useMemo(
     () =>
@@ -478,6 +504,10 @@ function StorageHistoryCard({ orgId }: { orgId: string }) {
       })),
     [data],
   );
+
+  if (error && !data) {
+    return <ErrorCard error={error} onRetry={refetch} />;
+  }
 
   return (
     <Card>
@@ -599,7 +629,7 @@ function StorageHistoryCard({ orgId }: { orgId: string }) {
 }
 
 function ConnectionsTab({ orgId }: { orgId: string }) {
-  const { data, isLoading } = useOrgStorageConnections(orgId);
+  const { data, isLoading, error, refetch } = useOrgStorageConnections(orgId);
 
   const columns: Column<OrgStorageConnection>[] = [
     {
@@ -662,6 +692,8 @@ function ConnectionsTab({ orgId }: { orgId: string }) {
           columns={columns}
           rows={data}
           loading={isLoading}
+          error={error}
+          onRetry={refetch}
           rowKey={(c) => c._id}
           emptyState={
             <div className="py-12 text-center">
@@ -681,7 +713,13 @@ function ConnectionsTab({ orgId }: { orgId: string }) {
 
 function AuditTab({ orgId }: { orgId: string }) {
   const [page, setPage] = useState(1);
-  const { data, isLoading, isFetching } = useOrgAuditLogs(orgId, {
+  const {
+    data,
+    isLoading,
+    error,
+    refetch,
+    isFetching,
+  } = useOrgAuditLogs(orgId, {
     page,
     limit: 15,
   });
@@ -738,6 +776,8 @@ function AuditTab({ orgId }: { orgId: string }) {
           columns={columns}
           rows={data?.data}
           loading={isLoading}
+          error={error}
+          onRetry={refetch}
           rowKey={(l) => l._id}
           emptyState={
             <div className="py-12 text-center">
